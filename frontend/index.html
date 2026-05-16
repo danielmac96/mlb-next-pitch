@@ -13,8 +13,6 @@
       --muted: #8b949e;
       --amber: #f0b429;
       --green: #3fb950;
-      --green-bg: rgba(63, 185, 80, 0.12);
-      --amber-bg: rgba(240, 180, 41, 0.10);
       --red: #f85149;
       --accent: #58a6ff;
     }
@@ -33,12 +31,7 @@
       padding: 2px 8px; border-radius: 4px; font-size: 11px;
       color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
     }
-    .badge.live::before {
-      content: "●"; color: var(--red); margin-right: 4px;
-      animation: pulse 1.6s infinite;
-    }
-    .badge.edge { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .badge.live { color: var(--red); border-color: var(--red); }
     .stamp { color: var(--muted); margin-left: auto; }
     button {
       font: inherit; background: var(--panel-2); color: var(--text);
@@ -56,13 +49,12 @@
     }
     .grid {
       display: grid; gap: 14px;
-      grid-template-columns: repeat(auto-fill, minmax(540px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
     }
     .card {
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 6px; overflow: hidden;
     }
-    .card.has-edge { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
     .card-head {
       display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
       padding: 8px 12px; background: var(--panel-2);
@@ -72,6 +64,14 @@
     .sit { color: var(--muted); }
     .sit .count { color: var(--amber); font-weight: 600; }
     .sit .half { color: var(--accent); }
+    .players {
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    .players .label { color: var(--muted); }
+    .players .name { color: var(--accent); font-weight: 600; }
+    .players .vs { color: var(--muted); margin: 0 8px; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td {
       text-align: left; padding: 6px 10px;
@@ -80,36 +80,8 @@
     th { color: var(--muted); font-weight: 500; background: var(--panel-2);
          text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
     tr:last-child td { border-bottom: none; }
-    tr.edge-strong td { background: var(--green-bg); font-weight: 700; color: var(--green); }
-    tr.edge-mild td { background: var(--amber-bg); color: var(--amber); }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
     td.neg { color: var(--muted); }
-    .probs-row td {
-      color: var(--muted); font-size: 11px; padding: 4px 10px 8px 28px;
-      background: rgba(0,0,0,0.18); border-bottom: 1px solid var(--border);
-    }
-    .probs-row .chip {
-      display: inline-block; margin-right: 10px;
-      padding: 1px 6px; background: var(--panel-2);
-      border: 1px solid var(--border); border-radius: 3px;
-    }
-    .probs-row .chip.argmax { color: var(--accent); border-color: var(--accent); }
-    .features-row td {
-      color: var(--muted); font-size: 11px;
-      padding: 2px 10px 6px 28px;
-      background: rgba(0,0,0,0.10);
-      border-bottom: 1px solid var(--border);
-      font-style: italic;
-    }
-    .features-row .feat {
-      display: inline-block; margin-right: 6px;
-      padding: 0 4px;
-      background: var(--panel-2); border: 1px solid var(--border);
-      border-radius: 3px; font-style: normal;
-    }
-    .badge.dq-green { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-    .badge.dq-amber { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
-    .badge.dq-red   { background: rgba(248,81,73,0.12); color: var(--red); border-color: var(--red); }
     .pa-log {
       padding: 6px 12px;
       background: var(--panel);
@@ -132,15 +104,11 @@
     .pitch .type { color: var(--accent); font-weight: 600; }
     .pitch .spd { color: var(--amber); }
     .pitch .res { color: var(--muted); }
-    .pitch.res-strike_foul { border-color: var(--green); }
-    .pitch.res-ball        { border-color: var(--accent); }
-    .pitch.res-in_play     { border-color: var(--amber); }
   </style>
 </head>
 <body>
   <header>
     <h1>MLB PITCH PREDICTOR</h1>
-    <span class="badge" id="modelBadge">freq_v1</span>
     <span class="badge live">LIVE</span>
     <span class="badge" id="countBadge">0 games</span>
     <button id="refreshBtn">Refresh</button>
@@ -151,10 +119,8 @@
   <div id="content"></div>
 
 <script>
-const API = "http://localhost:8000";
-const REFRESH_MS = 15000;
-const EDGE_STRONG = 0.05;
-const EDGE_MILD = 0.02;
+const API = "http://localhost:8001";
+const REFRESH_MS = 8000;
 
 const MARKET_LABEL = {
   pitch_speed_ou: "Pitch Speed O/U",
@@ -178,38 +144,14 @@ function fmtPct(v, digits = 1) {
   return (v * 100).toFixed(digits) + "%";
 }
 
-function fmtPrice(p) {
-  if (p === null || p === undefined) return "—";
-  return p > 0 ? `+${p}` : String(p);
-}
-
 function fmtPrediction(m) {
   if (m.market === "pitch_speed_ou") return fmtNum(m.predicted_value, 2) + " mph";
   if (m.market === "ab_pitches_ou")  return fmtNum(m.predicted_value, 2);
   return m.recommendation ? `${m.recommendation} ${fmtPct(m.predicted_value)}` : "—";
 }
 
-function edgeClass(edge) {
-  if (typeof edge !== "number") return "";
-  if (edge > EDGE_STRONG) return "edge-strong";
-  if (edge > EDGE_MILD)   return "edge-mild";
-  return "";
-}
-
-function renderProbs(probs, argmax) {
-  if (!probs) return "";
-  const chips = Object.entries(probs)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => {
-      const cls = k === argmax ? "chip argmax" : "chip";
-      return `<span class="${cls}">${k}: ${fmtPct(v)}</span>`;
-    }).join("");
-  return chips;
-}
-
 function shortDescription(desc) {
   if (!desc) return "";
-  // Compress wordy MLB descriptions: "swinging_strike_blocked" -> "swinging_strike"
   return desc.replace(/_blocked$/, "");
 }
 
@@ -218,13 +160,12 @@ function renderPaLog(pitches) {
     return `<div class="pa-log"><span class="pa-empty">no pitches yet in this PA</span></div>`;
   }
   const chips = pitches.map(p => {
-    const cls = p.result_category ? `pitch res-${p.result_category}` : "pitch";
     const num = p.pitch_number !== null && p.pitch_number !== undefined ? `#${p.pitch_number}` : "";
     const type = p.pitch_type || "??";
     const spd = p.start_speed !== null && p.start_speed !== undefined ? `${fmtNum(p.start_speed, 1)}` : "—";
     const desc = shortDescription(p.description) || p.result_category || "—";
     const zone = p.zone !== null && p.zone !== undefined ? `z${p.zone}` : "";
-    return `<span class="${cls}">
+    return `<span class="pitch">
       <span class="num">${num}</span>
       <span class="type">${type}</span>
       <span class="spd">${spd}</span>
@@ -235,51 +176,39 @@ function renderPaLog(pitches) {
   return `<div class="pa-log">${chips}</div>`;
 }
 
-function renderFeatures(feats) {
-  if (!feats || !feats.length) return "";
-  const chips = feats.map(f => `<span class="feat">${f}</span>`).join("");
-  return `<tr class="features-row"><td colspan="8">via: ${chips}</td></tr>`;
-}
-
 function renderMarketRow(m) {
-  const cls = edgeClass(m.edge);
   const edgeCell = (m.edge === null || m.edge === undefined)
     ? `<td class="num neg">—</td>`
     : `<td class="num">${fmtPct(m.edge, 2)}</td>`;
   return `
-    <tr class="${cls}">
+    <tr>
       <td>${MARKET_LABEL[m.market] || m.market}</td>
       <td>${fmtPrediction(m)}</td>
       <td class="num">${m.line === null || m.line === undefined ? "—" : fmtNum(m.line, 2)}</td>
-      <td>${m.recommendation || "—"}</td>
-      <td class="num">${fmtPrice(m.price)}</td>
       ${edgeCell}
       <td class="num">${fmtNum(m.confidence, 3)}</td>
       <td class="num">${m.sample_size ?? 0}</td>
     </tr>
-    ${m.probs ? `<tr class="probs-row"><td colspan="8">${renderProbs(m.probs, m.recommendation)}</td></tr>` : ""}
-    ${renderFeatures(m.features_used)}
   `;
 }
 
-function dataQuality(markets) {
-  if (!markets || !markets.length) return { cls: "dq-red", pct: 0 };
-  const real = markets.filter(m => (m.sample_size ?? 0) > 0).length;
-  const pct = real / markets.length;
-  const cls = pct > 0.75 ? "dq-green" : pct >= 0.25 ? "dq-amber" : "dq-red";
-  return { cls, pct };
+function renderPlayers(g) {
+  const pitcher = g.pitcher_name || (g.situation && g.situation.pitcher_id ? `#${g.situation.pitcher_id}` : "—");
+  const batter  = g.batter_name  || (g.situation && g.situation.batter_id  ? `#${g.situation.batter_id}`  : "—");
+  return `
+    <div class="players">
+      <span class="label">Pitcher:</span> <span class="name">${pitcher}</span>
+      <span class="vs">vs</span>
+      <span class="label">Batter:</span> <span class="name">${batter}</span>
+    </div>
+  `;
 }
 
 function renderCard(g) {
-  const edgeBadge = g.has_edge
-    ? `<span class="badge edge">EDGE ${fmtPct(g.top_edge, 2)}</span>`
-    : "";
-  const dq = dataQuality(g.markets);
-  const dqBadge = `<span class="badge ${dq.cls}">DATA ${Math.round(dq.pct * 100)}%</span>`;
   const s = g.situation || {};
   const rows = (g.markets || []).map(renderMarketRow).join("");
   return `
-    <div class="card ${g.has_edge ? "has-edge" : ""}">
+    <div class="card">
       <div class="card-head">
         <span class="matchup">${g.game_label}</span>
         <span class="sit">
@@ -288,15 +217,14 @@ function renderCard(g) {
           · ${s.outs ?? "?"} out
           · pitch ${s.pitch_count_pa ?? 0}
         </span>
-        ${dqBadge}
-        ${edgeBadge}
       </div>
+      ${renderPlayers(g)}
       ${renderPaLog(g.current_pa_pitches)}
       <table>
         <thead>
           <tr>
-            <th>Market</th><th>Prediction</th><th>Line</th><th>Rec</th>
-            <th>Price</th><th>Edge</th><th>Conf</th><th>Samples</th>
+            <th>Market</th><th>Prediction</th><th>Line</th>
+            <th>Edge</th><th>Conf</th><th>Samples</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -322,7 +250,6 @@ async function refresh() {
       $("content").innerHTML = `<div class="grid">${games.map(renderCard).join("")}</div>`;
     }
     setText("stamp", new Date().toLocaleTimeString());
-    if (games.length && games[0].model_version) setText("modelBadge", games[0].model_version);
   } catch (e) {
     console.error("refresh failed", e);
     showError(`Fetch failed: ${e.message} (showing last successful data if any)`);

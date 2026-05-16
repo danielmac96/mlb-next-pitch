@@ -18,6 +18,19 @@ load_dotenv()
 MLB_API_BASE = os.environ.get("MLB_API_BASE", "https://statsapi.mlb.com/api/v1")
 LIVE_STATUSES = {"In Progress", "Live"}
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(
+            base_url=MLB_API_BASE,
+            timeout=10.0,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
+        )
+    return _client
+
 # Map MLB Stats API call codes -> Statcast-style description strings, so live and
 # historical pitches share one vocabulary downstream.
 CALL_CODE_TO_DESCRIPTION = {
@@ -93,13 +106,12 @@ def _flatten_pitch(game_pk: int, play: dict, event: dict) -> dict:
 
 
 async def get_live_games() -> list[dict]:
-    async with httpx.AsyncClient(base_url=MLB_API_BASE, timeout=15.0) as client:
-        r = await client.get(
-            "/schedule",
-            params={"sportId": 1, "gameType": "R", "hydrate": "linescore"},
-        )
-        r.raise_for_status()
-        data = r.json()
+    r = await _get_client().get(
+        "/schedule",
+        params={"sportId": 1, "gameType": "R", "hydrate": "linescore"},
+    )
+    r.raise_for_status()
+    data = r.json()
     out: list[dict] = []
     for date in data.get("dates", []):
         for g in date.get("games", []):
@@ -116,17 +128,15 @@ async def get_live_games() -> list[dict]:
 
 
 async def get_live_game_state(game_pk: int) -> dict:
-    async with httpx.AsyncClient(base_url=MLB_API_BASE, timeout=15.0) as client:
-        r = await client.get(f"/game/{game_pk}/linescore")
-        r.raise_for_status()
-        return r.json()
+    r = await _get_client().get(f"/game/{game_pk}/linescore")
+    r.raise_for_status()
+    return r.json()
 
 
 async def get_play_by_play(game_pk: int) -> list[dict]:
-    async with httpx.AsyncClient(base_url=MLB_API_BASE, timeout=15.0) as client:
-        r = await client.get(f"/game/{game_pk}/playByPlay")
-        r.raise_for_status()
-        data = r.json()
+    r = await _get_client().get(f"/game/{game_pk}/playByPlay")
+    r.raise_for_status()
+    data = r.json()
     pitches: list[dict] = []
     for play in data.get("allPlays", []):
         for event in play.get("playEvents", []):

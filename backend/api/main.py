@@ -18,7 +18,7 @@ from backend.ingestion.player_info import ensure_players
 from backend.models.predictor import PitchPredictor
 from backend.models.stats_cache import get_cache
 
-POLL_INTERVAL_SECONDS = 15
+POLL_INTERVAL_SECONDS = 8
 STATS_REFRESH_SECONDS = 3600
 ROLLING_REFRESH_SECONDS = 6 * 3600
 
@@ -82,6 +82,48 @@ def _upsert_pitches(pitches: list[dict]) -> int:
     return len(rows)
 
 
+async def _enrich_async(game_pk: int, pitches: list[dict], state: dict | None) -> None:
+    all_pitchers = {p["pitcher_id"] for p in pitches if p.get("pitcher_id")}
+    all_batters = {p["batter_id"] for p in pitches if p.get("batter_id")}
+    try:
+        await ensure_players(list(all_pitchers), list(all_batters))
+    except Exception as exc:
+        print(f"[POLLER] ensure_players failed game={game_pk}: {exc}")
+    try:
+        await upsert_game_context(game_pk)
+    except Exception as exc:
+        print(f"[POLLER] game_context failed game={game_pk}: {exc}")
+    pitcher_id = (state or {}).get("pitcher_id")
+    if pitcher_id is not None:
+        try:
+            await update_pitcher_game_log(game_pk, pitcher_id, pitches)
+        except Exception as exc:
+            print(f"[POLLER] pitcher_game_log failed game={game_pk}: {exc}")
+
+
+async def _process_game(game_pk: int) -> None:
+    try:
+        pitches = await get_play_by_play(game_pk)
+        n, state = await asyncio.to_thread(_upsert_and_state, pitches)
+        print(f"[POLLER] game={game_pk} pitches_total={n} pa={state['pitch_count_pa'] if state else '-'}")
+    except Exception as exc:
+        print(f"[POLLER] game={game_pk} failed: {exc}")
+        return
+    # Phase 2 enrichments run detached so the next poll tick isn't blocked.
+    asyncio.create_task(_enrich_async(game_pk, pitches, state))
+
+
+def _upsert_and_state(pitches: list[dict]) -> tuple[int, dict | None]:
+    n = _upsert_pitches(pitches)
+    state = _build_live_state(pitches)
+    if state is not None:
+        # Pull game_pk from the first indexed pitch (all pitches share it).
+        gp = next((p["game_pk"] for p in pitches if p.get("game_pk") is not None), None)
+        if gp is not None:
+            upsert_live_state(gp, state)
+    return n, state
+
+
 async def _poll_once() -> None:
     try:
         games = await get_live_games()
@@ -97,37 +139,10 @@ async def _poll_once() -> None:
                 "home_team": g.get("home_team"),
                 "away_team": g.get("away_team"),
             }
-    for g in games:
-        game_pk = g["game_pk"]
-        try:
-            pitches = await get_play_by_play(game_pk)
-            n = _upsert_pitches(pitches)
-            state = _build_live_state(pitches)
-            if state is not None:
-                upsert_live_state(game_pk, state)
-            print(f"[POLLER] game={game_pk} pitches_total={n} pa={state['pitch_count_pa'] if state else '-'}")
-        except Exception as exc:
-            print(f"[POLLER] game={game_pk} failed: {exc}")
-            continue
-
-        # Phase 2 enrichments. Each is best-effort; a failure logs and
-        # never breaks the poll cycle.
-        all_pitchers = {p["pitcher_id"] for p in pitches if p.get("pitcher_id")}
-        all_batters = {p["batter_id"] for p in pitches if p.get("batter_id")}
-        try:
-            await ensure_players(list(all_pitchers), list(all_batters))
-        except Exception as exc:
-            print(f"[POLLER] ensure_players failed game={game_pk}: {exc}")
-        try:
-            await upsert_game_context(game_pk)
-        except Exception as exc:
-            print(f"[POLLER] game_context failed game={game_pk}: {exc}")
-        pitcher_id = (state or {}).get("pitcher_id")
-        if pitcher_id is not None:
-            try:
-                await update_pitcher_game_log(game_pk, pitcher_id, pitches)
-            except Exception as exc:
-                print(f"[POLLER] pitcher_game_log failed game={game_pk}: {exc}")
+    await asyncio.gather(
+        *[_process_game(g["game_pk"]) for g in games if g.get("game_pk") is not None],
+        return_exceptions=True,
+    )
 
 
 async def _poll_loop() -> None:

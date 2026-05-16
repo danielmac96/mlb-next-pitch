@@ -21,6 +21,17 @@ router = APIRouter(tags=["live"])
 
 _predictor = PitchPredictor()
 
+# game_pk -> (last_pitch_ts, payload). Lets /live skip predictor + DB work
+# when nothing has changed since the last build.
+_payload_cache: dict[int, tuple[str | None, dict]] = {}
+
+
+def _player_name(player_id: int | None) -> str | None:
+    if player_id is None:
+        return None
+    info = get_cache().get_player_info(player_id)
+    return (info or {}).get("full_name") if info else None
+
 
 def _context_from(ls: dict) -> dict:
     return {
@@ -117,6 +128,17 @@ def _build_game_payload(ls: dict) -> dict:
     from backend.api.main import get_game_label
 
     game_pk = ls["game_pk"]
+    last_ts = ls.get("last_pitch_ts")
+
+    cached = _payload_cache.get(game_pk)
+    if cached and cached[0] == last_ts:
+        payload = dict(cached[1])
+        payload["game_label"] = get_game_label(game_pk)
+        # Names may have populated after first paint; refresh the cheap fields.
+        payload["pitcher_name"] = _player_name(ls.get("pitcher_id"))
+        payload["batter_name"] = _player_name(ls.get("batter_id"))
+        return payload
+
     ctx = _context_from(ls)
 
     p_speed = _predictor.predict_pitch_speed(ctx)
@@ -143,7 +165,7 @@ def _build_game_payload(ls: dict) -> dict:
     top_edge = max(edges) if edges else 0.0
     has_edge = top_edge > 0.05
 
-    # Background audit write (best-effort, non-blocking).
+    # Background audit write (best-effort, non-blocking). Only on state change.
     asyncio.create_task(_persist_async(game_pk, preds_all))
 
     try:
@@ -152,9 +174,11 @@ def _build_game_payload(ls: dict) -> dict:
         print(f"[live] current_pa_pitches failed game={game_pk}: {exc}")
         current_pa_pitches = []
 
-    return {
+    payload = {
         "game_pk": game_pk,
         "game_label": get_game_label(game_pk),
+        "pitcher_name": _player_name(ls.get("pitcher_id")),
+        "batter_name": _player_name(ls.get("batter_id")),
         "situation": _situation(ls),
         "current_pa_pitches": current_pa_pitches,
         "markets": markets,
@@ -162,6 +186,8 @@ def _build_game_payload(ls: dict) -> dict:
         "top_edge": top_edge,
         "model_version": _predictor.model_version,
     }
+    _payload_cache[game_pk] = (last_ts, payload)
+    return payload
 
 
 async def _persist_async(game_pk: int, preds: list[dict]) -> None:
@@ -173,28 +199,31 @@ async def _persist_async(game_pk: int, preds: list[dict]) -> None:
 
 
 def _load_current_pa_pitches(game_pk: int) -> list[dict]:
-    """Pitches in the current (latest) at-bat for this game, oldest first."""
-    latest = (
-        get_client().table("pitches")
-        .select("at_bat_index")
-        .eq("game_pk", game_pk)
-        .order("at_bat_index", desc=True)
-        .limit(1).execute().data
-    )
-    if not latest:
-        return []
-    abi = latest[0].get("at_bat_index")
-    if abi is None:
-        return []
+    """Pitches in the current (latest) at-bat for this game, oldest first.
+
+    Single Supabase round-trip: fetch the most-recent rows ordered by
+    (at_bat_index desc, pitch_number desc), then keep only the top
+    at_bat_index group and reverse to oldest-first. Limit 20 is well
+    above any realistic single-PA pitch count.
+    """
     rows = (
         get_client().table("pitches")
-        .select("pitch_number,pitch_type,start_speed,zone,description,result_category,balls,strikes")
-        .eq("game_pk", game_pk).eq("at_bat_index", abi)
-        .order("pitch_number")
+        .select("at_bat_index,pitch_number,pitch_type,start_speed,zone,description,result_category,balls,strikes")
+        .eq("game_pk", game_pk)
+        .order("at_bat_index", desc=True)
+        .order("pitch_number", desc=True)
+        .limit(20)
         .execute().data
         or []
     )
-    return rows
+    if not rows:
+        return []
+    top_abi = rows[0].get("at_bat_index")
+    current = [r for r in rows if r.get("at_bat_index") == top_abi]
+    current.sort(key=lambda r: r.get("pitch_number") or 0)
+    for r in current:
+        r.pop("at_bat_index", None)
+    return current
 
 
 def _load_all_live() -> list[dict]:
