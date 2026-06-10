@@ -15,6 +15,7 @@ a single worker — see the startup guard in main.py.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 
@@ -26,6 +27,8 @@ class LiveStore:
         self._pa_pitches: dict[int, list[dict]] = {}
         # game_pk -> wall-clock time of last update (for diagnostics)
         self._updated_at: dict[int, float] = {}
+        # SSE subscribers: each is a queue that receives changed game_pks.
+        self._subscribers: set[asyncio.Queue[int]] = set()
 
     def update(
         self, game_pk: int, state: dict, pa_pitches: list[dict] | None
@@ -54,6 +57,31 @@ class LiveStore:
 
     def has_data(self) -> bool:
         return bool(self._states)
+
+    # --- SSE pub/sub --------------------------------------------------------
+    # All of these run on the single event loop (poller publishes, request
+    # handlers subscribe), so a plain set + asyncio.Queue needs no locking.
+
+    def subscribe(self) -> "asyncio.Queue[int]":
+        q: asyncio.Queue[int] = asyncio.Queue(maxsize=256)
+        self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q: "asyncio.Queue[int]") -> None:
+        self._subscribers.discard(q)
+
+    def publish(self, game_pk: int) -> None:
+        """Signal subscribers that game_pk changed. Never raises.
+
+        Drops the signal for any saturated consumer; the stream's periodic
+        snapshot makes that consumer whole again, so a slow client can never
+        stall the poller.
+        """
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(game_pk)
+            except asyncio.QueueFull:
+                pass
 
 
 _store = LiveStore()

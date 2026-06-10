@@ -179,7 +179,11 @@ async def _process_game(game_pk: int) -> None:
     if state is not None:
         state = {"game_pk": game_pk, **state}
         try:
-            get_store().update(game_pk, state, _build_current_pa_pitches(pitches))
+            store = get_store()
+            changed = store.update(game_pk, state, _build_current_pa_pitches(pitches))
+            if changed:
+                # Push to any connected SSE clients the instant a new pitch lands.
+                store.publish(game_pk)
         except Exception as exc:
             print(f"[POLLER] store update failed game={game_pk}: {exc}")
 

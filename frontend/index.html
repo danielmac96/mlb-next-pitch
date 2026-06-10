@@ -944,42 +944,94 @@ function App() {
   const gamesRef = useR(games);
   gamesRef.current = games;
 
-  // Combined poller: pull live feed, augment with sample odds (preserved
-  // across polls), then jitter so the UI feels alive between snapshots.
+  // Live feed: prefer the SSE push stream (updates the instant a pitch lands),
+  // and fall back to interval polling of /live if the stream errors. Both paths
+  // funnel through the same augment → jitter → recompute pipeline, so the UI is
+  // identical regardless of transport. Raw /live payloads are kept keyed by
+  // game_pk so a single-game SSE push can be merged without dropping the rest.
   useE(() => {
     let cancelled = false;
+    let es = null;
+    let pollId = null;
+    const rawByPk = new Map();
+
+    // Re-augment + jitter the current raw set and push it into React state.
+    function ingestRaw() {
+      const apiGames = [...rawByPk.values()];
+      const prevByPk = new Map(gamesRef.current.map(g => [g.game_pk, g]));
+      let next = apiGames.map(g => augmentLiveGame(g, prevByPk));
+      const { games: jittered, flash: nf } = window.MOCK.tick(next);
+      next = jittered.map(recomputeTopEdge);
+      setGames(next);
+      setFlash(nf);
+      setTickedAt(Date.now());
+      setFetchErr(null);
+      setLoaded(true);
+      setTimeout(() => setFlash(new Set()), 750);
+      // Auto-select any newly-appeared live game so the user sees it.
+      setFilters((f) => {
+        const merged = new Set(f.selectedGamePks);
+        let changed = false;
+        for (const g of next) {
+          if (!merged.has(g.game_pk)) { merged.add(g.game_pk); changed = true; }
+        }
+        return changed ? { ...f, selectedGamePks: merged } : f;
+      });
+    }
+
+    function setSnapshot(apiGames) {
+      rawByPk.clear();
+      for (const g of apiGames) rawByPk.set(g.game_pk, g);
+      ingestRaw();
+    }
+    function setOneGame(apiGame) {
+      rawByPk.set(apiGame.game_pk, apiGame);
+      ingestRaw();
+    }
+
     async function pollOnce() {
       try {
         const apiGames = await fetchLive();
-        if (cancelled) return;
-        const prevByPk = new Map(gamesRef.current.map(g => [g.game_pk, g]));
-        let next = apiGames.map(g => augmentLiveGame(g, prevByPk));
-        const { games: jittered, flash: nf } = window.MOCK.tick(next);
-        next = jittered.map(recomputeTopEdge);
-        setGames(next);
-        setFlash(nf);
-        setTickedAt(Date.now());
-        setFetchErr(null);
-        setLoaded(true);
-        setTimeout(() => setFlash(new Set()), 750);
-        // Auto-select any newly-appeared live game so the user sees it.
-        setFilters((f) => {
-          const merged = new Set(f.selectedGamePks);
-          let changed = false;
-          for (const g of next) {
-            if (!merged.has(g.game_pk)) { merged.add(g.game_pk); changed = true; }
-          }
-          return changed ? { ...f, selectedGamePks: merged } : f;
-        });
+        if (!cancelled) setSnapshot(apiGames);
       } catch (e) {
-        if (cancelled) return;
-        setFetchErr(e.message || String(e));
-        setLoaded(true);
+        if (!cancelled) { setFetchErr(e.message || String(e)); setLoaded(true); }
       }
     }
+    function startPolling() {
+      if (pollId) return;
+      pollOnce();
+      pollId = setInterval(pollOnce, POLL_MS);
+    }
+    function stopPolling() {
+      if (pollId) { clearInterval(pollId); pollId = null; }
+    }
+
+    // Immediate first paint.
     pollOnce();
-    const id = setInterval(pollOnce, POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+
+    // Live updates via SSE; fall back to polling on error.
+    try {
+      es = new EventSource(API_BASE + "/live/stream");
+      es.addEventListener("snapshot", (e) => {
+        if (cancelled) return;
+        stopPolling();
+        try { setSnapshot(JSON.parse(e.data)); } catch (_) {}
+      });
+      es.addEventListener("game", (e) => {
+        if (cancelled) return;
+        try { setOneGame(JSON.parse(e.data)); } catch (_) {}
+      });
+      es.onopen = () => { if (!cancelled) stopPolling(); };
+      es.onerror = () => { if (!cancelled) startPolling(); };
+    } catch (_) {
+      startPolling();
+    }
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+      if (es) es.close();
+    };
   }, []);
 
   // re-render every 1s to keep "Xs ago" live
