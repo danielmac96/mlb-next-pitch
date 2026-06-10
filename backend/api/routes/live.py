@@ -8,9 +8,12 @@ POST /admin/reload-stats — force a stats-cache reload (returns updated counts)
 from __future__ import annotations
 
 import asyncio
+import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
+from backend.api.live_store import get_store
 from backend.db.client import get_client
 from backend.ingestion.odds_stub import calculate_edge, get_odds
 from backend.models._persist import current_pa_position, insert_predictions
@@ -168,11 +171,15 @@ def _build_game_payload(ls: dict) -> dict:
     # Background audit write (best-effort, non-blocking). Only on state change.
     asyncio.create_task(_persist_async(game_pk, preds_all))
 
-    try:
-        current_pa_pitches = _load_current_pa_pitches(game_pk)
-    except Exception as exc:
-        print(f"[live] current_pa_pitches failed game={game_pk}: {exc}")
-        current_pa_pitches = []
+    # Prefer the in-memory current-PA pitches the poller already derived; only
+    # hit Supabase when the store has nothing for this game (graceful fallback).
+    current_pa_pitches = get_store().get_pa_pitches(game_pk)
+    if current_pa_pitches is None:
+        try:
+            current_pa_pitches = _load_current_pa_pitches(game_pk)
+        except Exception as exc:
+            print(f"[live] current_pa_pitches failed game={game_pk}: {exc}")
+            current_pa_pitches = []
 
     payload = {
         "game_pk": game_pk,
@@ -242,17 +249,84 @@ def _load_one_live(game_pk: int) -> dict | None:
     return rows[0] if rows else None
 
 
-@router.get("/live")
-async def get_live() -> list[dict]:
-    states = await asyncio.to_thread(_load_all_live)
+async def _states_for_live() -> list[dict]:
+    """In-memory states if the poller has populated the store; otherwise fall
+    back to reading live_state from Supabase (e.g. right after a restart)."""
+    states = get_store().all_states()
+    if states:
+        return states
+    return await asyncio.to_thread(_load_all_live)
+
+
+def _snapshot_payloads() -> list[dict]:
+    states = get_store().all_states()
     payloads = [_build_game_payload(ls) for ls in states if ls.get("game_pk") is not None]
     payloads.sort(key=lambda p: -p["top_edge"])
     return payloads
 
 
+def _sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.get("/live")
+async def get_live() -> list[dict]:
+    states = await _states_for_live()
+    payloads = [_build_game_payload(ls) for ls in states if ls.get("game_pk") is not None]
+    payloads.sort(key=lambda p: -p["top_edge"])
+    return payloads
+
+
+@router.get("/live/stream")
+async def live_stream(request: Request) -> StreamingResponse:
+    """Server-Sent Events feed of live games.
+
+    Emits one `snapshot` event on connect (full list, same shape as GET /live),
+    then a `game` event per game the instant the poller derives a new pitch —
+    eliminating the frontend's poll-interval delay. Every 15s with no activity
+    it re-emits a `snapshot`, which doubles as a keepalive and as recovery for
+    any client that missed a push. The frontend falls back to polling /live if
+    the stream errors, so existing behavior is preserved when SSE is unavailable.
+    """
+    store = get_store()
+    queue = store.subscribe()
+
+    async def gen():
+        try:
+            yield _sse("snapshot", _snapshot_payloads())
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    game_pk = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield _sse("snapshot", _snapshot_payloads())
+                    continue
+                ls = store.get_state(game_pk)
+                if ls is None:
+                    continue
+                try:
+                    payload = _build_game_payload(ls)
+                except Exception as exc:
+                    print(f"[live] stream payload failed game={game_pk}: {exc}")
+                    continue
+                yield _sse("game", payload)
+        finally:
+            store.unsubscribe(queue)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # don't let nginx buffer the stream
+    }
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
 @router.get("/live/{game_pk}")
 async def get_live_game(game_pk: int) -> dict:
-    ls = await asyncio.to_thread(_load_one_live, game_pk)
+    ls = get_store().get_state(game_pk)
+    if ls is None:
+        ls = await asyncio.to_thread(_load_one_live, game_pk)
     if not ls:
         raise HTTPException(404, detail=f"no live_state row for game_pk={game_pk}")
     return _build_game_payload(ls)
