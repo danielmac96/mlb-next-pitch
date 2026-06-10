@@ -42,6 +42,18 @@ _PA_PITCH_COLS = [
 ]
 
 
+# Strong refs to detached fire-and-forget tasks. asyncio only holds weak refs,
+# so without this a Supabase write could be GC'd mid-flight. The done-callback
+# drops the ref once the task finishes.
+_BG_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
+
 def _warn_if_multi_worker() -> None:
     """Loudly warn if started with >1 worker.
 
@@ -171,15 +183,15 @@ async def _process_game(game_pk: int) -> None:
         except Exception as exc:
             print(f"[POLLER] store update failed game={game_pk}: {exc}")
 
-    # Supabase audit write (Phase 2 makes this fire-and-forget).
-    try:
-        n = await asyncio.to_thread(_persist_game, game_pk, pitches, state)
-        print(f"[POLLER] game={game_pk} pitches_total={n} pa={state['pitch_count_pa'] if state else '-'}")
-    except Exception as exc:
-        print(f"[POLLER] persist failed game={game_pk}: {exc}")
+    print(f"[POLLER] game={game_pk} pitches={len(pitches)} pa={state['pitch_count_pa'] if state else '-'}")
+
+    # Supabase is the audit log only. Write fire-and-forget so a slow or failing
+    # Supabase never blocks this tick or any /live request — the store is already
+    # updated above, so requests are served regardless of the write's outcome.
+    _spawn(_persist_game_async(game_pk, pitches, state))
 
     # Phase 2 enrichments run detached so the next poll tick isn't blocked.
-    asyncio.create_task(_enrich_async(game_pk, pitches, state))
+    _spawn(_enrich_async(game_pk, pitches, state))
 
 
 def _persist_game(game_pk: int, pitches: list[dict], state: dict | None) -> int:
@@ -188,6 +200,14 @@ def _persist_game(game_pk: int, pitches: list[dict], state: dict | None) -> int:
         ls = {k: v for k, v in state.items() if k != "game_pk"}
         upsert_live_state(game_pk, ls)
     return n
+
+
+async def _persist_game_async(game_pk: int, pitches: list[dict], state: dict | None) -> None:
+    try:
+        n = await asyncio.to_thread(_persist_game, game_pk, pitches, state)
+        print(f"[POLLER] persisted game={game_pk} pitches_total={n}")
+    except Exception as exc:
+        print(f"[POLLER] persist failed game={game_pk}: {exc}")
 
 
 async def _poll_once() -> None:
