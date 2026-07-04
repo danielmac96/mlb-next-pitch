@@ -1,6 +1,38 @@
-## MLB Pitch Predictor — MVP
+## NextPitch — MLB live at-bat markets MVP
 
-End-to-end pipeline that ingests historical Statcast data, polls live MLB games every `POLL_INTERVAL_SECONDS` (default 8s), runs stub predictors for four pitch/at-bat markets, and exposes the results through a FastAPI backend and two static frontends. Predictions are intentionally rule-based — the goal of this MVP is to lock in the data shape and API contract before any real ML work.
+An end-to-end product that ingests all MLB data daily, polls live games in real
+time, runs per-market models, prices them against real odds, and tracks every
+pick — **all hosted on Supabase** (Postgres + edge functions + pg_cron). A
+static frontend reads it directly for a live investor demo.
+
+> **Production runs on Supabase, not this FastAPI app.** See
+> [`docs/DEPLOY.md`](docs/DEPLOY.md) and `scripts/provision.sh` for the hosted
+> pipeline (`supabase/functions/`, `supabase/migrations/`). The FastAPI backend
+> in `backend/` remains a full local-dev stack that mirrors the same logic, but
+> nothing in production depends on it.
+
+### Hosted pipeline (Supabase)
+
+| edge function | cadence (pg_cron) | job |
+|---|---|---|
+| `backfill`      | every 1m while pending | historical games → `pitches`/`at_bats`/`games` |
+| `daily-ingest`  | daily 10:00 UTC | yesterday's finals + today's slate + rolling stats + players |
+| `live-poll`     | every 30s | live `live_state`, `predictions`, published `picks` |
+| `odds-ingest`   | every 5m | real odds from ESPN + Kalshi (free, no-auth) → `odds`, pregame picks |
+| `settle`        | every 10m | grade `predictions` and `picks` against outcomes |
+| `api`           | on request | public read API the frontend consumes |
+
+v1 models per market (`scripts/train_models.py` → `model_params`): multinomial
+logistic (pitch_result, ab_result), weighted linear + σ (pitch_speed),
+empirical remaining-pitches table (ab_pitches), log5 (moneyline). Until trained,
+scoring falls back to a labeled league-average heuristic so the app works day
+zero.
+
+### Local FastAPI stack (dev/mirror)
+
+Polls live MLB games every `POLL_INTERVAL_SECONDS` (default 8s), runs the same
+four pitch/at-bat market predictors, and exposes them via FastAPI. Useful for
+local iteration without deploying edge functions.
 
 ### Markets
 
