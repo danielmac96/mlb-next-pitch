@@ -53,6 +53,12 @@ supabase db query "insert into backfill_progress(id,start_date,end_date,cursor_d
   on conflict (id) do update set start_date=excluded.start_date,
     end_date=excluded.end_date, cursor_date=excluded.cursor_date, done=false;" >/dev/null
 
+if [ "${SEED_DEMO:-0}" = "1" ]; then
+  echo "== Loading demo seed (SEED_DEMO=1)"
+  supabase db query < supabase/seed_demo.sql >/dev/null
+  echo "   demo rows loaded (source='demo'); remove with: delete from picks where source='demo';"
+fi
+
 echo
 echo "== DONE. Pipeline is live."
 echo "   Frontend: set PITCH_EDGE_API to https://$REF.supabase.co/functions/v1/api"

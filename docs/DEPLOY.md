@@ -53,7 +53,13 @@ Kalshi ─────────┤   ─────────────�
    ```
    (Re-run weekly, or wire it into CI. Until it runs, live predictions
    fall back to a league-average heuristic and are labeled as such.)
-6. **Frontend** — in `frontend/config.js` replace
+6. **(Optional) demo seed** — for off-hours investor demos when no games
+   are live, load a small labeled sample so the board and record render
+   populated: `supabase db query < supabase/seed_demo.sql` (or run
+   `provision.sh` with `SEED_DEMO=1`). Everything is `source='demo'`;
+   remove with `delete from picks where source='demo';`. Don't load it
+   into an instance you present as a real track record.
+7. **Frontend** — in `frontend/config.js` replace
    `{{SUPABASE_FUNCTIONS_URL}}` with `https://<ref>.supabase.co/functions/v1`,
    then host `frontend/` anywhere static (Vercel, GitHub Pages, S3…).
 
