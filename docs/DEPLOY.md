@@ -22,7 +22,27 @@ Kalshi ─────────┤   ─────────────�
                                                           /record, /sportsbooks
 ```
 
-## One-time provisioning
+## Fastest path — GitHub Actions (no local setup)
+
+You don't need a local machine or CLI. Add three repository secrets under
+**Settings → Secrets and variables → Actions**:
+
+| secret | where |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | supabase.com/dashboard/account/tokens |
+| `SUPABASE_PROJECT_REF`  | Project Settings → General |
+| `SUPABASE_DB_PASSWORD`  | Project Settings → Database |
+
+Then **Actions → "Deploy pipeline to Supabase" → Run workflow** (tick
+"Load demo seed" for an immediately-populated board). It pushes migrations,
+stores the cron secret + functions URL, deploys all six functions, and seeds
+the backfill — idempotent, so re-run it to ship changes. Train models later
+with the **"Train models"** workflow (needs `SUPABASE_URL` + `SUPABASE_KEY`
+secrets). Deploy the frontend on Vercel: import the repo (root `vercel.json`
+is preconfigured) and set env var `SUPABASE_FUNCTIONS_URL` =
+`https://<ref>.supabase.co/functions/v1`.
+
+## One-time provisioning (local CLI alternative)
 
 1. **Migrations** — apply, in order, `supabase/migrations/*.sql`
    (via MCP `apply_migration`, `supabase db push`, or the SQL editor).
@@ -53,7 +73,13 @@ Kalshi ─────────┤   ─────────────�
    ```
    (Re-run weekly, or wire it into CI. Until it runs, live predictions
    fall back to a league-average heuristic and are labeled as such.)
-6. **Frontend** — in `frontend/config.js` replace
+6. **(Optional) demo seed** — for off-hours investor demos when no games
+   are live, load a small labeled sample so the board and record render
+   populated: `supabase db query < supabase/seed_demo.sql` (or run
+   `provision.sh` with `SEED_DEMO=1`). Everything is `source='demo'`;
+   remove with `delete from picks where source='demo';`. Don't load it
+   into an instance you present as a real track record.
+7. **Frontend** — in `frontend/config.js` replace
    `{{SUPABASE_FUNCTIONS_URL}}` with `https://<ref>.supabase.co/functions/v1`,
    then host `frontend/` anywhere static (Vercel, GitHub Pages, S3…).
 

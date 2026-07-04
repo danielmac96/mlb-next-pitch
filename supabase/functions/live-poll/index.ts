@@ -204,11 +204,14 @@ Deno.serve(async (req) => {
         if (predErr) errors.push(`pred ${g.game_pk}: ${predErr.message}`);
         else predictionsWritten += predRows.length;
 
-        // Publish an at-bat pick when the model strongly beats league base.
+        // Publish an at-bat pick once, at the start of the PA (first pitch just
+        // landed — the earliest live_state we ever observe for a new batter),
+        // when the model strongly beats the league base rate. The unique
+        // constraint on (date, game, market, at_bat_index, rec) dedupes.
         const abProbs = abr.probs ?? {};
         for (const cls of ["strikeout", "walk", "hit"]) {
           const p = abProbs[cls];
-          if (p != null && p - LEAGUE_AB[cls] >= AB_PICK_MARGIN && ctx.pitch_count_pa === 0) {
+          if (p != null && p - LEAGUE_AB[cls] >= AB_PICK_MARGIN && ctx.pitch_count_pa <= 1) {
             const batterName = (bInfo as any).data?.full_name ?? "Batter";
             picksWritten += await publishPick(g, {
               market: "ab_result", recommendation: cls,

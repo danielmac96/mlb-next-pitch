@@ -1,0 +1,70 @@
+{
+  "allPlays": [
+    {
+      "result": { "type": "atBat", "event": "Strikeout", "eventType": "strikeout", "description": "Rafael Devers strikes out swinging." },
+      "about": { "atBatIndex": 0, "inning": 1, "isTopInning": true },
+      "matchup": {
+        "batter": { "id": 646240, "fullName": "Rafael Devers" },
+        "pitcher": { "id": 543037, "fullName": "Gerrit Cole" }
+      },
+      "playEvents": [
+        {
+          "type": "pitch", "pitchNumber": 1, "startTime": "2026-07-04T23:10:05.000Z",
+          "details": { "call": { "code": "C", "description": "Called Strike" }, "type": { "code": "FF", "description": "Four-Seam Fastball" } },
+          "pitchData": { "startSpeed": 97.4, "zone": 5 },
+          "count": { "balls": 0, "strikes": 1, "outs": 0 }
+        },
+        {
+          "type": "pitch", "pitchNumber": 2, "startTime": "2026-07-04T23:10:30.000Z",
+          "details": { "call": { "code": "B", "description": "Ball" }, "type": { "code": "SL", "description": "Slider" } },
+          "pitchData": { "startSpeed": 88.1, "zone": 13 },
+          "count": { "balls": 1, "strikes": 1, "outs": 0 }
+        },
+        {
+          "type": "pitch", "pitchNumber": 3, "startTime": "2026-07-04T23:10:55.000Z",
+          "details": { "call": { "code": "S", "description": "Swinging Strike" }, "type": { "code": "SL", "description": "Slider" } },
+          "pitchData": { "startSpeed": 87.6, "zone": 14 },
+          "count": { "balls": 1, "strikes": 2, "outs": 0 }
+        }
+      ]
+    },
+    {
+      "result": { "type": "atBat", "event": "Walk", "eventType": "walk", "description": "Aaron Judge walks." },
+      "about": { "atBatIndex": 1, "inning": 1, "isTopInning": true },
+      "matchup": {
+        "batter": { "id": 592450, "fullName": "Aaron Judge" },
+        "pitcher": { "id": 543037, "fullName": "Gerrit Cole" }
+      },
+      "playEvents": [
+        {
+          "type": "pitch", "pitchNumber": 1, "startTime": "2026-07-04T23:12:05.000Z",
+          "details": { "call": { "code": "B", "description": "Ball" }, "type": { "code": "FF" } },
+          "pitchData": { "startSpeed": 98.0, "zone": 11 },
+          "count": { "balls": 1, "strikes": 0, "outs": 1 }
+        },
+        {
+          "type": "pitch", "pitchNumber": 2, "startTime": "2026-07-04T23:12:30.000Z",
+          "details": { "call": { "code": "F", "description": "Foul" }, "type": { "code": "FF" } },
+          "pitchData": { "startSpeed": 97.1, "zone": 4 },
+          "count": { "balls": 1, "strikes": 1, "outs": 1 }
+        }
+      ]
+    },
+    {
+      "result": { "type": "atBat" },
+      "about": { "atBatIndex": 2, "inning": 1, "isTopInning": true },
+      "matchup": {
+        "batter": { "id": 665742, "fullName": "Juan Soto" },
+        "pitcher": { "id": 543037, "fullName": "Gerrit Cole" }
+      },
+      "playEvents": [
+        {
+          "type": "pitch", "pitchNumber": 1, "startTime": "2026-07-04T23:14:05.000Z",
+          "details": { "call": { "code": "C", "description": "Called Strike" }, "type": { "code": "KC" } },
+          "pitchData": { "startSpeed": 84.2, "zone": 6 },
+          "count": { "balls": 0, "strikes": 1, "outs": 2 }
+        }
+      ]
+    }
+  ]
+}

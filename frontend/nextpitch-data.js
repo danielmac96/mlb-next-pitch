@@ -527,6 +527,9 @@ window.NEXTPITCH = (function () {
     const label = lg.game_label || "";
     let away = "", home = "";
     if (label.includes(" @ ")) { [away, home] = label.split(" @ ", 2); }
+    // Prefer compact abbreviations + live scores when the API supplies them.
+    if (lg.away_abbr) away = lg.away_abbr;
+    if (lg.home_abbr) home = lg.home_abbr;
 
     const pitches = (lg.current_pa_pitches || []).map((p) => ({
       n: p.pitch_number, type: p.pitch_type || "—",
@@ -545,9 +548,12 @@ window.NEXTPITCH = (function () {
     return {
       gamePk: lg.game_pk, away: away || "AWY", home: home || "HOM",
       label: label || `${away} @ ${home}`, venue: lg.venue || "",
-      score: { away: "—", home: "—" },
-      pitcher: { name: lg.pitcher_name || "TBD", hand: "", meta: "" },
-      batter: { name: lg.batter_name || "TBD", hand: "", meta: "" },
+      score: {
+        away: sit.away_score != null ? String(sit.away_score) : "—",
+        home: sit.home_score != null ? String(sit.home_score) : "—",
+      },
+      pitcher: { name: lg.pitcher_name || "TBD", hand: lg.pitcher_hand || "", meta: "" },
+      batter: { name: lg.batter_name || "TBD", hand: lg.batter_hand || "", meta: "" },
       onDeck: "On-deck TBD",
       inning: sit.inning, half: sit.half || "▲", count: sit.count || "0-0",
       outs: sit.outs || 0,

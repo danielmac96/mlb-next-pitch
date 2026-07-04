@@ -26,20 +26,17 @@ cd "$ROOT"
 echo "== Linking project $REF"
 supabase link --project-ref "$REF"
 
-echo "== Preparing cron migration (substituting project ref)"
-CRON_MIG="supabase/migrations/20260703000002_cron.sql"
-tmp="$(mktemp)"
-sed "s/{{PROJECT_REF}}/$REF/g" "$CRON_MIG" > "$tmp"
-cp "$tmp" "$CRON_MIG"
-rm -f "$tmp"
-
 echo "== Pushing migrations"
 supabase db push
 
-echo "== Storing cron secret"
+echo "== Storing cron secret + functions base URL"
 CRON_SECRET="${CRON_SECRET:-$(openssl rand -hex 24)}"
-supabase db query "insert into app_secrets(key,value) values('cron_secret','$CRON_SECRET') on conflict (key) do update set value=excluded.value;" >/dev/null
-echo "   cron secret stored (len=${#CRON_SECRET})"
+FUNCTIONS_URL="https://$REF.supabase.co/functions/v1"
+supabase db query "insert into app_secrets(key,value) values
+  ('cron_secret','$CRON_SECRET'),
+  ('functions_base_url','$FUNCTIONS_URL')
+  on conflict (key) do update set value=excluded.value;" >/dev/null
+echo "   cron secret stored (len=${#CRON_SECRET}); functions_base_url=$FUNCTIONS_URL"
 
 echo "== Deploying edge functions"
 for fn in api backfill daily-ingest live-poll odds-ingest settle; do
@@ -52,6 +49,12 @@ supabase db query "insert into backfill_progress(id,start_date,end_date,cursor_d
   values(1,'2025-03-27',current_date-1,current_date-1)
   on conflict (id) do update set start_date=excluded.start_date,
     end_date=excluded.end_date, cursor_date=excluded.cursor_date, done=false;" >/dev/null
+
+if [ "${SEED_DEMO:-0}" = "1" ]; then
+  echo "== Loading demo seed (SEED_DEMO=1)"
+  supabase db query < supabase/seed_demo.sql >/dev/null
+  echo "   demo rows loaded (source='demo'); remove with: delete from picks where source='demo';"
+fi
 
 echo
 echo "== DONE. Pipeline is live."
