@@ -110,7 +110,7 @@ async function settleTable(table: "predictions" | "picks"): Promise<{ graded: nu
     const gameLive = !isFinal;
     const finalScores = isFinal ? { home: game?.home_score ?? null, away: game?.away_score ?? null } : null;
 
-    for (const r of rows) {
+    for (const r of rows as any[]) {
       const pnRow = table === "picks" ? { ...r, pitch_number: null } : r;
       const grade = gradeRow(pnRow, pitches ?? [], absByIdx, gameLive, finalScores);
       if (!grade) continue;

@@ -50,7 +50,9 @@
       "Bash(grep -c \"^PASSED\" /tmp_pytest_out.txt)",
       "Bash(grep -c \"^FAILED\" /tmp_pytest_out.txt)",
       "Bash(grep -c \"^ERROR\" /tmp_pytest_out.txt)",
-      "Bash(grep -E \"passed|failed|error\" /tmp_pytest_out.txt)"
+      "Bash(grep -E \"passed|failed|error\" /tmp_pytest_out.txt)",
+      "Bash(deno --version)",
+      "Bash(sh)"
     ]
   }
 }
