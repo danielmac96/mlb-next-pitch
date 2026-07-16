@@ -584,14 +584,16 @@ window.NEXTPITCH = (function () {
     return games;
   }
 
-  const games = buildGames();
-  enrichUpcoming(games);
-  enrichPitchPredictions(games);
+  // Live-only boot: the board starts empty and fills from loadLive(). The
+  // sample generators above are kept for local demos (call buildGames() +
+  // enrichUpcoming/enrichPitchPredictions by hand); RECENT/RECORD sample
+  // literals are likewise not exported until graded picks ship in the UI.
+  const games = [];
   return {
-    SOURCES, MARKETS, OUTCOME_LABEL, RECENT, RECORD,
-    games, edges: buildEdges(games), buildEdges,
+    SOURCES, MARKETS, OUTCOME_LABEL, RECENT: [], RECORD: null,
+    games, edges: [], buildEdges,
     tick, impliedFromAmerican, americanFromImplied, calcEdge,
-    loadLive, buildGames, enrichUpcoming,
+    loadLive, buildGames, enrichUpcoming, enrichPitchPredictions,
   };
 })();
 

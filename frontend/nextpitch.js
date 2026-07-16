@@ -7,23 +7,20 @@
 // the DOM without a framework. Markup mirrors the design's inline-styled
 // template so it's pixel-faithful across the light/dark token palette.
 //
-// Data layer:
-//   • Home reads window.PICKS_DATA, best-effort hydrated from the backend
-//     (/sportsbooks, /picks/today, /record) with sample fallback.
-//   • Live Markets + Data Feed read window.NEXTPITCH.games — the bundled sample
-//     engine, swapped for real games via NEXTPITCH.loadLive (/live + /edge) when
-//     a backend answers. The live backend has no per-pitch model reads, so those
-//     feed columns render "—" in live mode (no synthetic betting edges).
+// Data layer (live-only):
+//   • Home shows today's schedule from GET /games, refreshed alongside polls.
+//   • Live Markets + Data Feed read window.NEXTPITCH.games, filled exclusively
+//     by NEXTPITCH.loadLive (/live + /edge). The board is empty outside game
+//     windows. No odds are ingested yet, so price/edge columns render "—";
+//     picks and the graded record return to the UI when odds ship.
 // ════════════════════════════════════════════════════════════════════════
 (function () {
   "use strict";
 
   const API_BASE = window.PITCH_EDGE_API || "http://localhost:8080";
   const POLL_MS = 8000;   // backend polls MLB every ~8s (POLL_INTERVAL_SECONDS)
-  const SIM_MS = 5000;    // sample-mode simulated movement
 
   const NP = window.NEXTPITCH;
-  let PD = window.PICKS_DATA;   // Home data (hydrated from the API when reachable)
 
   const esc = (s) =>
     String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
@@ -36,29 +33,24 @@
     return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
 
-  // ── Home data loaders (mirror the old site.js seams; sample fallback) ────
+  // ── Home data loaders ─────────────────────────────────────────────────
   async function fetchJson(path, init) {
     try {
       const r = await fetch(`${API_BASE}${path}`, init);
       return r.ok ? await r.json() : null;
     } catch (_e) { return null; }
   }
-  async function hydrateHome() {
-    const base = window.PICKS_DATA;
-    if (!base) return null;
-    const [books, picks, record] = await Promise.all([
-      fetchJson("/sportsbooks"), fetchJson("/picks/today"), fetchJson("/record"),
-    ]);
-    let changed = false;
-    const next = Object.assign({}, base);
-    if (books && Array.isArray(books.books) && books.books.length) {
-      const byKey = {};
-      books.books.forEach((b) => (byKey[b.key] = b));
-      next.BOOKS = byKey; changed = true;
-    }
-    if (Array.isArray(picks) && picks.length) { next.PICKS = picks; changed = true; }
-    if (record && record.overall) { next.RECORD = record; changed = true; }
-    return changed ? next : null;
+  // Today's schedule (GET /games). null = not loaded yet, [] = no games today.
+  let SLATE = null;
+  let SLATE_AT = 0;
+  async function fetchSlate() {
+    if (SLATE !== null && Date.now() - SLATE_AT < 60000) return false;
+    const rows = await fetchJson("/games");
+    if (!Array.isArray(rows)) return false;
+    SLATE_AT = Date.now();
+    const changed = JSON.stringify(rows) !== JSON.stringify(SLATE);
+    SLATE = rows;
+    return changed;
   }
 
   class Board {
@@ -66,13 +58,10 @@
       this.root = root;
       this.state = {
         view: "home", feedGame: null,
-        homeFilter: "best", openPicks: {},
         liveGames: {}, liveSources: { draftkings: true, fanduel: true, kalshi: true, polymarket: true },
         edgeThreshold: 0.03,
         dark: initialDark(), t: 0,
       };
-      this.live = false;
-      this._simIv = null;
       this._pollIv = null;
       this.root.addEventListener("click", (e) => this._onClick(e));
     }
@@ -129,11 +118,6 @@
       const r = Math.round(245 + (220 - 245) * t), g = Math.round(158 + (38 - 158) * t), b = Math.round(11 + (38 - 11) * t);
       return `rgb(${r},${g},${b})`;
     }
-    homeEdgeChip(t) {
-      const map = { hot: ["var(--good-bg)", "var(--good-strong)"], warm: ["var(--good-bg)", "var(--good-label)"], soft: ["var(--surface-2)", "var(--muted)"], neg: ["var(--bad-bg)", "var(--bad)"] };
-      const c = map[t] || map.soft;
-      return `display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.34rem .6rem;border-radius:9px;min-width:66px;background:${c[0]};color:${c[1]};flex:none;`;
-    }
     liveGameOn(pk) { return this.state.liveGames[pk] !== false; }
     selLiveSourceSet() { const s = this.state.liveSources; return new Set(Object.keys(s).filter((k) => s[k])); }
 
@@ -147,20 +131,10 @@
         case "view": return this.setState({ view: arg });
         case "goHome": return this.setState({ view: "home" });
         case "goLive": return this.setState({ view: "live" });
-        case "scrollPicks": {
-          const t = document.getElementById("home-picks");
-          if (t) window.scrollTo({ top: t.getBoundingClientRect().top + window.scrollY - 72, behavior: "smooth" });
-          return;
-        }
         case "theme": {
           const dark = !this.state.dark;
           localStorage.setItem("np-theme", dark ? "dark" : "light");
           return this.setState({ dark });
-        }
-        case "homeFilter": return this.setState({ homeFilter: arg });
-        case "togglePick": {
-          const o = Object.assign({}, this.state.openPicks); o[arg] = !o[arg];
-          return this.setState({ openPicks: o });
         }
         case "liveGame": {
           const pk = Number(arg);
@@ -186,7 +160,9 @@
       }).join("");
       const dark = this.dk();
       const liveCount = NP.games.filter((g) => !g.stale).length;
-      const liveText = `${liveCount} game${liveCount === 1 ? "" : "s"} live · ${this.live ? "auto-refreshing" : "sample board"}`;
+      const liveText = liveCount
+        ? `${liveCount} game${liveCount === 1 ? "" : "s"} live · auto-refreshing`
+        : "No games live right now";
       return `
       <header style="position:sticky;top:0;z-index:50;background:var(--header-bg);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);">
         <div style="width:min(1220px,95vw);margin:0 auto;display:flex;align-items:center;gap:.7rem 1.1rem;flex-wrap:wrap;padding:.7rem 0;">
@@ -208,141 +184,84 @@
       <footer style="background:#0f1b2d;color:#c4d1e0;padding:1.8rem 0;">
         <div style="width:min(1220px,95vw);margin:0 auto;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center;">
           <div data-act="goHome" style="display:flex;align-items:center;gap:.5rem;font-weight:800;font-size:1.05rem;color:inherit;cursor:pointer;"><span style="color:#4ade80;">◆</span> Next<span style="color:#4ade80;">Pitch</span></div>
-          <p style="margin:0;font-size:.74rem;color:#8a9bb2;max-width:46rem;flex:1;min-width:240px;">Illustrative model + market data — not real odds, not betting advice. 21+ and present where betting is legal. Confirm the live price at the book before wagering. Gambling problem? Call 1-800-GAMBLER.</p>
+          <p style="margin:0;font-size:.74rem;color:#8a9bb2;max-width:46rem;flex:1;min-width:240px;">Live MLB data with model-driven projections, for information and entertainment only — no odds or betting picks are shown, and nothing here is betting advice. 21+ where betting is legal. Gambling problem? Call 1-800-GAMBLER.</p>
         </div>
       </footer>`;
     }
 
     // ══ HOME ═════════════════════════════════════════════════════════════
     homeHtml() {
-      const D = PD;
-      if (!D) return `<div style="padding:4.5rem 0;text-align:center;color:var(--muted);">Loading…</div>`;
-      const o = D.RECORD.overall, l = D.RECORD.last30;
-      const winPct = (o.wins / (o.wins + o.losses) * 100).toFixed(1);
-      const units = (u) => `${u >= 0 ? "+" : "−"}${Math.abs(u).toFixed(1)}u`;
-      const signed = (v, suf) => `${v >= 0 ? "+" : "−"}${Math.abs(v)}${suf || ""}`;
-      const implied = (a) => (a == null ? null : a > 0 ? 100 / (a + 100) : -a / (-a + 100));
+      const slate = SLATE;
+      const liveNow = NP.games.filter((g) => !g.stale).length;
+      const isLiveStatus = (s) => /in progress|live|manager challenge/i.test(s || "");
+      const isFinalStatus = (s) => /final|game over|completed/i.test(s || "");
+      const fmtTime = (ts) => {
+        const d = new Date(ts);
+        return isNaN(d) ? "TBD" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      };
 
-      const heroUnitsStyle = `font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:800;color:${o.units >= 0 ? "#4ade80" : "#fb7185"};`;
-      const heroRoiStyle = `font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:800;color:${o.roi >= 0 ? "#4ade80" : "#fb7185"};`;
-
-      // hero
+      // hero — live status at a glance (picks + record return when odds ship)
+      const total = Array.isArray(slate) ? slate.length : null;
+      const firstPitch = Array.isArray(slate) && slate.length ? fmtTime(slate[0].start_ts) : null;
+      const glance = [
+        { big: total == null ? "—" : String(total), lbl: "games today" },
+        { big: firstPitch || "—", lbl: "first pitch" },
+        { big: String(liveNow), lbl: "live right now" },
+      ].map((t) => `
+            <div style="display:flex;flex-direction:column;"><span style="font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:800;">${esc(t.big)}</span><span style="font-size:.76rem;color:#9fb2c9;margin-top:.15rem;">${esc(t.lbl)}</span></div>`).join("");
       const hero = `
       <div style="display:grid;grid-template-columns:1.25fr .9fr;gap:2rem;align-items:center;background:linear-gradient(180deg,var(--surface),var(--bg));border:1px solid var(--border);border-radius:18px;padding:clamp(1.6rem,4vw,2.6rem);margin-bottom:1.4rem;">
         <div>
           <span style="display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--good-strong);background:var(--good-bg);padding:.3rem .6rem;border-radius:999px;margin-bottom:1rem;">MLB · At-Bat Markets</span>
           <h1 style="font-size:clamp(1.9rem,4vw,3rem);font-weight:800;letter-spacing:-.02em;margin:0;line-height:1.08;">The next pitch, called before it's thrown.</h1>
-          <p style="font-size:1.08rem;color:var(--text-2);max-width:34rem;margin:1rem 0 1.4rem;">Model-driven picks on strikeouts, pitch speed, and at-bat outcomes — each with the reasoning laid out and a track record you can check before you trust it.</p>
+          <p style="font-size:1.08rem;color:var(--text-2);max-width:34rem;margin:1rem 0 1.4rem;">Live pitch-by-pitch data with model-predicted probabilities for every at-bat. The board wakes at first pitch and follows every game — odds comparison and graded picks are on the way.</p>
           <div style="display:flex;gap:.7rem;flex-wrap:wrap;">
             <button data-act="goLive" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;font-weight:600;font-size:.92rem;padding:.62rem 1.05rem;border-radius:9px;border:1px solid transparent;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;">Open the live board →</button>
-            <button data-act="scrollPicks" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;font-weight:600;font-size:.92rem;padding:.62rem 1.05rem;border-radius:9px;border:1px solid var(--border-2);background:var(--surface);color:var(--text);cursor:pointer;font-family:inherit;">See today's picks</button>
           </div>
           <p style="margin-top:1rem;font-size:.8rem;color:var(--muted);letter-spacing:.02em;">21+ · For entertainment · 1-800-GAMBLER</p>
         </div>
         <div style="background:var(--bc-bg);color:#fff;border-radius:14px;padding:1.4rem 1.5rem;box-shadow:0 12px 40px rgba(15,27,45,.18);">
-          <span style="font-size:.78rem;font-weight:600;color:#9fb2c9;letter-spacing:.04em;text-transform:uppercase;">Verified track record</span>
-          <div style="display:flex;gap:1.3rem;margin:1.1rem 0 1.2rem;flex-wrap:wrap;">
-            <div style="display:flex;flex-direction:column;"><span style="font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:800;">${esc(winPct)}%</span><span style="font-size:.76rem;color:#9fb2c9;margin-top:.15rem;">win rate</span></div>
-            <div style="display:flex;flex-direction:column;"><span style="${heroUnitsStyle}">${esc(units(o.units))}</span><span style="font-size:.76rem;color:#9fb2c9;margin-top:.15rem;">net units</span></div>
-            <div style="display:flex;flex-direction:column;"><span style="${heroRoiStyle}">${esc(signed(o.roi, "%"))}</span><span style="font-size:.76rem;color:#9fb2c9;margin-top:.15rem;">ROI</span></div>
-          </div>
-          <div style="font-size:.88rem;font-weight:600;color:#8fd3ad;">Based on ${esc(o.picks)} graded picks</div>
+          <span style="font-size:.78rem;font-weight:600;color:#9fb2c9;letter-spacing:.04em;text-transform:uppercase;">Today at a glance</span>
+          <div style="display:flex;gap:1.3rem;margin:1.1rem 0 1.2rem;flex-wrap:wrap;">${glance}</div>
+          <div style="font-size:.88rem;font-weight:600;color:#8fd3ad;">${liveNow ? "Games are live — the model is reading every pitch." : "Live model reads begin at first pitch."}</div>
         </div>
       </div>`;
 
-      // today's picks
-      const byEdge = (a, b) => (b.edge - a.edge) || (b.confidence - a.confidence);
-      const counts = {}; D.PICKS.forEach((p) => (counts[p.market] = (counts[p.market] || 0) + 1));
-      const filter = this.state.homeFilter;
-      const fdefs = [["best", "Best", D.PICKS.length]].concat(Object.keys(D.MARKETS).filter((k) => counts[k]).map((k) => [k, D.MARKETS[k].label, counts[k]]));
-      const homeFilters = fdefs.map(([k, label, n]) => {
-        const on = filter === k;
-        const style = `display:inline-flex;align-items:center;gap:.4rem;border:1px solid ${on ? "var(--pill-active-bg)" : "var(--border-2)"};background:${on ? "var(--pill-active-bg)" : "var(--surface)"};color:${on ? "var(--pill-active-fg)" : "var(--text-2)"};font-family:inherit;font-weight:600;font-size:.82rem;padding:.42rem .82rem;border-radius:999px;cursor:pointer;transition:all .14s;`;
-        return `<button data-act="homeFilter" data-arg="${k}" style="${style}">${esc(label)} <span style="opacity:.6;font-family:'IBM Plex Mono',monospace;">${esc(n)}</span></button>`;
-      }).join("");
-      const list = (filter === "best" ? D.PICKS.slice() : D.PICKS.filter((p) => p.market === filter)).sort(byEdge);
-      const today = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" });
-      const picksSub = filter === "best"
-        ? `Top ${list.length} live opportunities across all markets for ${today}, ranked by model edge — tap "Why this pick" for the reasoning.`
-        : `${list.length} ${(D.MARKETS[filter] || {}).label || filter} pick${list.length === 1 ? "" : "s"} for ${today}, best edge first.`;
-
-      const cards = list.map((p) => {
-        const conf = Math.round((p.confidence || 0) * 100);
-        const imp = implied(p.price);
-        const tv = p.edge >= 0.06 ? "hot" : p.edge >= 0.03 ? "warm" : p.edge >= 0 ? "soft" : "neg";
-        const open = !!this.state.openPicks[p.id];
-        const book = (D.BOOKS[p.book] || {});
-        const bookLbl = book.short || book.name || p.book;
-        const pn = p.pitcher.note, bn = p.batter.note;
-        const why = open ? `
-          <div style="padding-top:.5rem;">
-            <p style="font-size:.82rem;color:var(--text-2);margin:0 0 .55rem;">${imp != null ? `Model ${conf}% · Market implies ${Math.round(imp * 100)}%` : "Supporting factors"}</p>
-            <ul style="margin:0;padding-left:1.05rem;display:flex;flex-direction:column;gap:.4rem;">
-              ${(p.bullets || []).map((b) => `<li style="font-size:.86rem;color:var(--text-2);">${esc(b)}</li>`).join("")}
-            </ul>
-            <p style="font-size:.72rem;color:var(--faint);margin:.7rem 0 0;">Confirm the live line at the book before betting. Illustrative only.</p>
-          </div>` : "";
-        return `
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.15rem 1.2rem;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);display:flex;flex-direction:column;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;">
-            <div style="display:flex;flex-direction:column;">
-              <span style="font-weight:800;font-size:1rem;">${esc(p.game.away)} <span style="color:var(--vs);font-weight:500;">@</span> ${esc(p.game.home)}</span>
-              <span style="font-size:.78rem;color:var(--muted);margin-top:.12rem;">${esc(p.game.first_pitch)} · ${esc(p.game.venue)}</span>
-            </div>
-            <span style="font-size:.7rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--blue);background:var(--blue-bg);padding:.26rem .55rem;border-radius:6px;white-space:nowrap;">${esc((D.MARKETS[p.market] || {}).label || p.market)}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.6rem;margin:.95rem 0;padding:.75rem;background:var(--surface-2);border-radius:9px;">
-            <div style="display:flex;flex-direction:column;min-width:0;">
-              <span style="font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);">Pitcher</span>
-              <span style="font-weight:700;font-size:.9rem;margin-top:.1rem;">${esc(p.pitcher.name)} <span style="font-size:.7rem;color:var(--muted);">${esc(p.pitcher.hand)}</span></span>
-              ${pn ? `<span style="font-size:.74rem;color:var(--muted);margin-top:.1rem;">${esc(pn)}</span>` : ""}
-            </div>
-            <span style="font-size:.72rem;font-weight:700;color:var(--vs);">vs</span>
-            <div style="display:flex;flex-direction:column;min-width:0;">
-              <span style="font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);">Batter</span>
-              <span style="font-weight:700;font-size:.9rem;margin-top:.1rem;">${esc(p.batter.name)} <span style="font-size:.7rem;color:var(--muted);">${esc(p.batter.hand)}</span></span>
-              ${bn ? `<span style="font-size:.74rem;color:var(--muted);margin-top:.1rem;">${esc(bn)}</span>` : ""}
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-            <div style="display:flex;flex-direction:column;">
-              <span style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);">Pick</span>
-              <span style="font-size:1.3rem;font-weight:800;color:var(--text);letter-spacing:-.01em;">${esc(p.pick)}</span>
-            </div>
-            <div style="text-align:right;">
-              <span style="display:block;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:1.2rem;">${esc(this.am(p.price))}</span>
-              <span style="font-size:.72rem;color:var(--muted);font-weight:600;">${esc(bookLbl)}</span>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:1rem;margin:1rem 0 .35rem;">
-            <div style="flex:1;">
-              <div style="display:flex;justify-content:space-between;font-size:.76rem;color:var(--text-2);font-weight:600;margin-bottom:.3rem;"><span>Model confidence</span><span>${conf}%</span></div>
-              <div style="height:7px;background:var(--track);border-radius:999px;overflow:hidden;"><div style="height:100%;width:${conf}%;background:linear-gradient(90deg,var(--accent),var(--good-strong));border-radius:999px;"></div></div>
-            </div>
-            <div style="${this.homeEdgeChip(tv)}">
-              <span style="font-family:'IBM Plex Mono',monospace;font-weight:800;font-size:1rem;line-height:1;">${esc(signed(((p.edge || 0) * 100).toFixed(1), "%"))}</span>
-              <span style="font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.15rem;opacity:.8;">edge</span>
-            </div>
-          </div>
-          <button data-act="togglePick" data-arg="${esc(p.id)}" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:0;border-top:1px solid var(--border);margin-top:.7rem;padding:.7rem .1rem .1rem;cursor:pointer;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--text-2);">
-            <span>Why this pick</span><span style="color:var(--muted);">${open ? "▴" : "▾"}</span>
-          </button>
-          ${why}
-        </div>`;
-      }).join("");
-
-      const picks = `
-      <div id="home-picks" style="margin-bottom:1.6rem;">
-        <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.1rem;">
-          <div>
-            <h2 style="font-size:clamp(1.4rem,3vw,1.9rem);font-weight:800;letter-spacing:-.02em;margin:0;">Today's quick picks</h2>
-            <p style="margin:.35rem 0 0;color:var(--muted);font-size:.95rem;max-width:44rem;">${esc(picksSub)}</p>
-          </div>
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">${homeFilters}</div>
+      // today's schedule (GET /games)
+      let slateRows;
+      if (slate === null) {
+        slateRows = `<div style="padding:1.4rem 1rem;color:var(--muted);font-style:italic;">Loading today's schedule…</div>`;
+      } else if (!slate.length) {
+        slateRows = `<div style="padding:1.4rem 1rem;color:var(--muted);">No MLB games scheduled today.</div>`;
+      } else {
+        slateRows = slate.map((g) => {
+          const liveG = isLiveStatus(g.status);
+          const finalG = isFinalStatus(g.status);
+          const chip = liveG
+            ? `font-size:.68rem;font-weight:800;letter-spacing:.04em;padding:.2rem .55rem;border-radius:6px;color:var(--good-strong);background:var(--good-bg);white-space:nowrap;`
+            : `font-size:.68rem;font-weight:700;letter-spacing:.04em;padding:.2rem .55rem;border-radius:6px;color:var(--muted);background:var(--surface-2);white-space:nowrap;`;
+          const chipText = liveG ? "LIVE" : finalG ? "FINAL" : (g.status || "Scheduled").toUpperCase();
+          const watch = liveG
+            ? `<button data-act="goLive" style="border:0;background:transparent;color:var(--accent);font-family:inherit;font-weight:700;font-size:.82rem;cursor:pointer;padding:0;">Watch live →</button>`
+            : "";
+          return `
+          <div style="display:grid;grid-template-columns:72px 1fr auto auto;gap:.8rem;align-items:center;padding:.75rem .85rem;border-bottom:1px solid var(--row-border);">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:.86rem;color:var(--muted);">${esc(fmtTime(g.start_ts))}</span>
+            <span style="font-weight:700;font-size:.95rem;">${esc(g.away_abbr || g.away_team)} <span style="color:var(--vs);font-weight:500;">@</span> ${esc(g.home_abbr || g.home_team)}<span style="display:block;font-size:.76rem;color:var(--muted);font-weight:500;margin-top:.08rem;">${esc(g.away_team)} at ${esc(g.home_team)}</span></span>
+            <span style="${chip}">${esc(chipText)}</span>
+            <span style="min-width:76px;text-align:right;">${watch}</span>
+          </div>`;
+        }).join("");
+      }
+      const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+      const slateBlock = `
+      <div style="margin-bottom:1.6rem;">
+        <div style="margin-bottom:1rem;">
+          <h2 style="font-size:clamp(1.4rem,3vw,1.9rem);font-weight:800;letter-spacing:-.02em;margin:0;">Today's schedule</h2>
+          <p style="margin:.35rem 0 0;color:var(--muted);font-size:.95rem;">${esc(today)} — live model reads open with each game window.</p>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:1.1rem;">${cards}</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);">${slateRows}</div>
       </div>`;
-
       // live board promo
       const promo = `
       <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:2rem;align-items:center;background:var(--bc-bg);border:1px solid var(--bc-inner);border-radius:18px;padding:clamp(1.6rem,4vw,2.6rem);margin-bottom:1.6rem;color:#fff;">
@@ -359,79 +278,12 @@
         </ul>
       </div>`;
 
-      // track record
-      const tileMeta = (tone) => ({
-        cardStyle: `background:var(--surface);border:1px solid var(--border);border-top:3px solid ${tone === "pos" ? "var(--accent)" : tone === "neg" ? "var(--bad)" : "var(--border)"};border-radius:14px;padding:1.1rem 1.15rem;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);`,
-        bigStyle: `font-family:'IBM Plex Mono',monospace;font-weight:800;font-size:1.55rem;color:${tone === "pos" ? "var(--good-strong)" : tone === "neg" ? "var(--bad)" : "var(--text)"};`,
-      });
-      const recTiles = [
-        { big: `${o.wins}–${o.losses}${o.pushes ? "–" + o.pushes : ""}`, lbl: "Overall record", sub: `${o.picks} picks graded`, tone: "" },
-        { big: winPct + "%", lbl: "Win rate", sub: "Wins vs losses", tone: "" },
-        { big: units(o.units), lbl: "Net units", sub: "Flat-stake basis", tone: o.units >= 0 ? "pos" : "neg" },
-        { big: signed(o.roi, "%"), lbl: "ROI", sub: "Return on stake", tone: o.roi >= 0 ? "pos" : "neg" },
-        { big: units(l.units), lbl: "Last 30 days", sub: `${l.wins}–${l.losses}, ${signed(l.roi, "%")} ROI`, tone: l.units >= 0 ? "pos" : "neg" },
-      ].map((t) => {
-        const meta = tileMeta(t.tone);
-        return `<div style="${meta.cardStyle}"><span style="${meta.bigStyle}">${esc(t.big)}</span><span style="font-size:.86rem;font-weight:600;color:var(--text-2);margin-top:.25rem;">${esc(t.lbl)}</span><span style="font-size:.76rem;color:var(--muted);margin-top:.1rem;">${esc(t.sub)}</span></div>`;
-      }).join("");
-
-      const byMarket = (D.RECORD.byMarket || []).map((m) => {
-        const wp = m.wins + m.losses > 0 ? (m.wins / (m.wins + m.losses) * 100) : 0;
-        const unitsStyle = `text-align:right;font-family:'IBM Plex Mono',monospace;color:${m.units >= 0 ? "var(--good-strong)" : "var(--bad)"};`;
-        const roiStyle = `text-align:right;font-family:'IBM Plex Mono',monospace;color:${m.roi >= 0 ? "var(--good-strong)" : "var(--bad)"};`;
-        return `<div style="display:grid;grid-template-columns:2fr 1fr .8fr 1fr 1fr;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--row-border);font-size:.86rem;align-items:center;">
-          <span>${esc(m.label)}</span>
-          <span style="text-align:right;font-family:'IBM Plex Mono',monospace;">${esc(m.wins)}–${esc(m.losses)}${m.pushes ? "–" + esc(m.pushes) : ""}</span>
-          <span style="text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--text-2);">${wp.toFixed(0)}%</span>
-          <span style="${unitsStyle}">${esc(units(m.units))}</span>
-          <span style="${roiStyle}">${esc(signed(m.roi, "%"))}</span>
-        </div>`;
-      }).join("");
-
-      const recentSettled = (D.RECORD.recent || []).map((r) => {
-        const tone = r.result === "win" ? ["var(--good-strong)", "var(--good-bg)"] : r.result === "loss" ? ["var(--bad)", "var(--bad-bg)"] : ["var(--amber)", "var(--amber-bg)"];
-        const rs = `font-size:.66rem;font-weight:800;padding:.2rem .5rem;border-radius:6px;letter-spacing:.03em;color:${tone[0]};background:${tone[1]};`;
-        return `<div style="display:grid;grid-template-columns:.6fr 2.2fr .8fr .8fr;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--row-border);font-size:.84rem;align-items:center;">
-          <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);">${esc(r.date.slice(5))}</span>
-          <span>${esc(r.pick)}<span style="display:block;font-size:.74rem;color:var(--muted);margin-top:.05rem;">${esc(r.matchup)}</span></span>
-          <span style="text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--muted);">${esc(this.am(r.price))}</span>
-          <span style="text-align:right;"><span style="${rs}">${esc(r.result.toUpperCase())}</span></span>
-        </div>`;
-      }).join("");
-
-      const record = `
-      <div style="margin-bottom:1.6rem;">
-        <div style="margin-bottom:1rem;">
-          <h2 style="font-size:clamp(1.4rem,3vw,1.9rem);font-weight:800;letter-spacing:-.02em;margin:0;">Track record</h2>
-          <p style="margin:.35rem 0 0;color:var(--muted);font-size:.95rem;">Every graded pick, kept in the open. Updated ${esc(D.RECORD.updated)}.</p>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem;margin-bottom:1.4rem;">${recTiles}</div>
-        <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:1.4rem;">
-          <div>
-            <h3 style="font-size:1.05rem;font-weight:700;margin:0 0 .7rem;">By market</h3>
-            <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);">
-              <div style="display:grid;grid-template-columns:2fr 1fr .8fr 1fr 1fr;gap:.5rem;padding:.6rem .85rem;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:.66rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;">
-                <span>Market</span><span style="text-align:right;">W–L</span><span style="text-align:right;">Win%</span><span style="text-align:right;">Units</span><span style="text-align:right;">ROI</span>
-              </div>${byMarket}
-            </div>
-          </div>
-          <div>
-            <h3 style="font-size:1.05rem;font-weight:700;margin:0 0 .7rem;">Recently settled</h3>
-            <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);">
-              <div style="display:grid;grid-template-columns:.6fr 2.2fr .8fr .8fr;gap:.5rem;padding:.6rem .85rem;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:.66rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;">
-                <span>Date</span><span>Pick</span><span style="text-align:right;">Odds</span><span style="text-align:right;">Result</span>
-              </div>${recentSettled}
-            </div>
-          </div>
-        </div>
-      </div>`;
-
       // how it works
       const steps = [
         ["1", "Ingest", "Historical Statcast plus a live MLB feed give us pitch-by-pitch context for every matchup."],
-        ["2", "Model", "Per-market models project the next pitch and at-bat, then compare to the live line to find an edge."],
-        ["3", "Publish", "Only +EV picks make the board — each with the supporting reasons and a one-tap link to the book."],
-        ["4", "Grade", "Every pick is settled win / loss / push and added to the public record. No deleting cold streaks."],
+        ["2", "Model", "Per-market models project the next pitch and at-bat in real time, updating with every pitch."],
+        ["3", "Watch", "Every live at-bat gets a model read — probabilities and projections stream to the live board."],
+        ["4", "Next up", "Live odds comparison, +EV picks, and a public graded record are on the way."],
       ].map(([n, title, body]) => `
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.3rem;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:var(--bc-bg);color:#fff;font-weight:800;margin-bottom:.8rem;">${n}</span>
@@ -444,11 +296,22 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.1rem;">${steps}</div>
       </div>`;
 
-      return hero + picks + promo + record + how;
+      return hero + slateBlock + promo + how;
     }
 
     // ══ LIVE MARKETS ═════════════════════════════════════════════════════
     liveHtml() {
+      if (!NP.games.length) {
+        return `
+      <div style="margin-bottom:1.1rem;">
+        <h1 style="font-size:clamp(1.5rem,3vw,2.05rem);font-weight:800;letter-spacing:-.02em;margin:0;">Live markets</h1>
+        <p style="margin:.3rem 0 0;color:var(--muted);font-size:.95rem;">One panel per live at-bat — game state on the left, the model's pitch-by-pitch read on the right.</p>
+      </div>
+      <div style="padding:3.5rem 1rem;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:14px;">
+        <div style="font-size:1.05rem;font-weight:700;margin-bottom:.35rem;">No live games right now</div>
+        <div style="font-size:.9rem;color:var(--muted);">The board wakes up automatically at first pitch — <button data-act="goHome" style="border:0;background:transparent;color:var(--accent);font-family:inherit;font-weight:700;font-size:.9rem;cursor:pointer;padding:0;">see today's schedule</button>.</div>
+      </div>`;
+      }
       const thr = this.state.edgeThreshold;
       const sel = this.selLiveSourceSet();
       // per-source edge adjustment: books carry vig (worse), markets near-fair
@@ -734,6 +597,18 @@
         </div>`;
       }).join("");
 
+      // settled-picks proof points return with the graded record
+      const recentBlock = NP.RECENT.length ? `
+      <div style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 .6rem;">Recently settled at-bats</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;overflow-x:auto;">
+        <div style="min-width:560px;">
+          <div style="display:grid;grid-template-columns:.6fr 1fr 1.2fr 1.6fr .5fr .7fr auto;gap:.5rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:.5rem .4rem;border-bottom:1px solid var(--border);">
+            <span>Date</span><span>Game</span><span>Batter</span><span>Pick</span><span>P</span><span>Price</span><span style="text-align:right;">Result</span>
+          </div>
+          ${recentRows}
+        </div>
+      </div>` : "";
+
       return `
       <div style="margin-bottom:.9rem;">
         <h1 style="font-size:clamp(1.5rem,3vw,2.05rem);font-weight:800;letter-spacing:-.02em;margin:0;">Data feed</h1>
@@ -800,7 +675,7 @@
           <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--track);font-size:.78rem;color:var(--text-2);">
             <div><span style="color:var(--faint);">Pitches (PA)</span> <b style="font-weight:700;">${esc(sel.pitchCountPa)}</b></div>
             <div><span style="color:var(--faint);">AB pitches proj</span> <b style="font-weight:700;color:var(--accent);">${esc(abProj)}</b></div>
-            <div><span style="color:var(--faint);">Model</span> <b style="font-weight:700;">${esc(sel.modelVersion || "sample")}</b></div>
+            <div><span style="color:var(--faint);">Model</span> <b style="font-weight:700;">${esc(sel.modelVersion || "—")}</b></div>
           </div>
         </div>
       </div>
@@ -815,15 +690,7 @@
         </div>
       </div>
 
-      <div style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 .6rem;">Recently settled at-bats</div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;overflow-x:auto;">
-        <div style="min-width:560px;">
-          <div style="display:grid;grid-template-columns:.6fr 1fr 1.2fr 1.6fr .5fr .7fr auto;gap:.5rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:.5rem .4rem;border-bottom:1px solid var(--border);">
-            <span>Date</span><span>Game</span><span>Batter</span><span>Pick</span><span>P</span><span>Price</span><span style="text-align:right;">Result</span>
-          </div>
-          ${recentRows}
-        </div>
-      </div>`;
+      ${recentBlock}`;
     }
 
     render() {
@@ -840,31 +707,25 @@
     }
 
     // ── data lifecycle ────────────────────────────────────────────────────
-    startSim() {
-      clearInterval(this._simIv);
-      this._simIv = setInterval(() => {
-        if (this.live) return;
-        NP.tick(NP.games);
-        this.setState({ t: this.state.t + 1 });
-      }, SIM_MS);
-    }
     async poll() {
       try {
         const games = await NP.loadLive(API_BASE);
-        if (games && games.length) {
+        if (Array.isArray(games)) {
+          // [] is a real answer (no live games) — empty the board.
           NP.games = games;
-          if (!this.live) { this.live = true; clearInterval(this._simIv); }
-          if (!games.some((g) => g.gamePk === this.state.feedGame)) this.state.feedGame = games[0].gamePk;
+          if (games.length && !games.some((g) => g.gamePk === this.state.feedGame)) {
+            this.state.feedGame = games[0].gamePk;
+          }
           this.render();
         }
-        // On a fetch error NP.loadLive returns null → keep last-good board.
+        // loadLive throws on network error → keep last-good board.
       } catch (_e) { console.warn("[nextpitch] live poll failed; keeping last data"); }
     }
     async hydrate() {
       try {
-        const next = await hydrateHome();
-        if (next) { PD = next; if (this.state.view === "home") this.render(); }
-      } catch (_e) { /* keep sample Home data */ }
+        const changed = await fetchSlate();
+        if (changed && this.state.view === "home") this.render();
+      } catch (_e) { /* keep last-good schedule */ }
     }
     // ±20% jitter so 1000 clients don't stampede the origin in lockstep.
     _jitter(ms) { return Math.round(ms * (0.8 + Math.random() * 0.4)); }
@@ -874,13 +735,15 @@
     }
     async _pollTick() {
       // Pause network work while the tab is backgrounded.
-      if (!document.hidden) { await this.poll(); await this.checkHealth(); }
+      if (!document.hidden) { await this.poll(); await this.hydrate(); await this.checkHealth(); }
       this._scheduleNextPoll();
     }
-    // Show a "data delayed" banner when /health reports live-poll is >2m stale.
+    // Show a "data delayed" banner when /health reports live-poll is >2m stale
+    // WHILE games are on the board. Outside game windows the poller sleeps by
+    // design, so an idle board is never flagged as stale.
     async checkHealth() {
       const h = await fetchJson("/health");
-      this._setStaleBanner(!!(h && h.data_fresh === false), h);
+      this._setStaleBanner(!!(h && h.data_fresh === false) && NP.games.length > 0, h);
     }
     _setStaleBanner(stale, h) {
       let el = document.getElementById("np-stale");
@@ -899,7 +762,6 @@
     }
     start() {
       this.render();
-      this.startSim();
       this.hydrate();
       this.poll();
       this.checkHealth();
