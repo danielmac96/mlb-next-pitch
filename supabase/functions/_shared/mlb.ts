@@ -143,7 +143,25 @@ function flattenPitch(gamePk: number, play: any, ev: any): PitchRow {
   };
 }
 
-export async function getPlayByPlay(gamePk: number): Promise<{ pitches: PitchRow[]; atBats: AtBatRow[] }> {
+// Snapshot of the newest play in the feed. MLB posts the next play (with the
+// new matchup, count 0-0) moments after an at-bat completes and before its
+// first pitch — this is how the poller knows a PA ended and who bats next.
+export interface CurrentPlaySummary {
+  at_bat_index: number | null;
+  is_complete: boolean;
+  batter_id: number | null;
+  pitcher_id: number | null;
+  balls: number;
+  strikes: number;
+  outs: number;
+  inning: number | null;
+  top_inning: boolean | null;
+  pitch_count: number;
+}
+
+export async function getPlayByPlay(
+  gamePk: number,
+): Promise<{ pitches: PitchRow[]; atBats: AtBatRow[]; currentPlay: CurrentPlaySummary | null }> {
   const data = await mlbGet(`/game/${gamePk}/playByPlay`);
   const pitches: PitchRow[] = [];
   const atBats: AtBatRow[] = [];
@@ -165,11 +183,51 @@ export async function getPlayByPlay(gamePk: number): Promise<{ pitches: PitchRow
       });
     }
   }
-  return { pitches, atBats };
+  const plays = data.allPlays ?? [];
+  const lastPlay = plays.length ? plays[plays.length - 1] : null;
+  const currentPlay: CurrentPlaySummary | null = lastPlay
+    ? {
+      at_bat_index: lastPlay?.about?.atBatIndex ?? null,
+      is_complete: lastPlay?.about?.isComplete === true,
+      batter_id: lastPlay?.matchup?.batter?.id ?? null,
+      pitcher_id: lastPlay?.matchup?.pitcher?.id ?? null,
+      balls: lastPlay?.count?.balls ?? 0,
+      strikes: lastPlay?.count?.strikes ?? 0,
+      outs: lastPlay?.count?.outs ?? 0,
+      inning: lastPlay?.about?.inning ?? null,
+      top_inning: lastPlay?.about?.isTopInning ?? null,
+      pitch_count: (lastPlay?.playEvents ?? []).filter((e: any) => e.type === "pitch").length,
+    }
+    : null;
+  return { pitches, atBats, currentPlay };
 }
 
-export function deriveLiveState(gamePk: number, pitches: PitchRow[]): Record<string, unknown> | null {
+export function deriveLiveState(
+  gamePk: number, pitches: PitchRow[], currentPlay?: CurrentPlaySummary | null,
+): Record<string, unknown> | null {
   const indexed = pitches.filter((p) => p.at_bat_index != null);
+  // Prefer the in-progress play: it rolls to the next batter (count 0-0) the
+  // moment the previous at-bat ends, before any pitch is thrown to them. The
+  // pitch-derived fallback below can only see the ended PA's final count.
+  if (currentPlay && !currentPlay.is_complete && currentPlay.at_bat_index != null) {
+    const lastTs = indexed
+      .map((p) => p.pitch_ts).filter(Boolean)
+      .sort().pop() ?? null;
+    return {
+      game_pk: gamePk,
+      status: "live",
+      inning: currentPlay.inning,
+      top_inning: currentPlay.top_inning,
+      batter_id: currentPlay.batter_id,
+      pitcher_id: currentPlay.pitcher_id,
+      balls: currentPlay.balls,
+      strikes: currentPlay.strikes,
+      outs: currentPlay.outs,
+      pitch_count_pa: currentPlay.pitch_count,
+      last_pitch_ts: lastTs,
+      updated_at: new Date().toISOString(),
+    };
+  }
   if (!indexed.length) return null;
   const latestAb = Math.max(...indexed.map((p) => p.at_bat_index!));
   const pa = indexed.filter((p) => p.at_bat_index === latestAb)

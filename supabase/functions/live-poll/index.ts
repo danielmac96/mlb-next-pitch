@@ -118,18 +118,28 @@ Deno.serve(async (req) => {
 
     for (const g of liveGames) {
       try {
-        const { pitches, atBats } = await getPlayByPlay(g.game_pk);
-        const state = deriveLiveState(g.game_pk, pitches);
+        const { pitches, atBats, currentPlay } = await getPlayByPlay(g.game_pk);
+        const state = deriveLiveState(g.game_pk, pitches, currentPlay);
         if (!state) continue;
 
         // Skip DB writes when nothing new happened since the stored state.
         const { data: prevLs } = await db.from("live_state")
-          .select("last_pitch_ts,pitch_count_pa").eq("game_pk", g.game_pk).maybeSingle();
+          .select("last_pitch_ts,pitch_count_pa,batter_id").eq("game_pk", g.game_pk).maybeSingle();
         // Compare as epoch ms: Postgres returns "…11.04+00:00" while MLB sends
         // "…11.040Z" — string equality never holds and every poll looks new.
         const prevTs = prevLs?.last_pitch_ts ? Date.parse(prevLs.last_pitch_ts) : NaN;
         const curTs = state.last_pitch_ts ? Date.parse(String(state.last_pitch_ts)) : NaN;
-        const changed = !prevLs || isNaN(prevTs) || isNaN(curTs) || prevTs !== curTs;
+        // Both-NaN (no pitch thrown yet on either side) is NOT a change, or the
+        // pre-first-pitch window would write a duplicate batch every poll.
+        const tsChanged = isNaN(prevTs) || isNaN(curTs)
+          ? !(isNaN(prevTs) && isNaN(curTs))
+          : prevTs !== curTs;
+        // A state is also "new" when the PA rolls without a pitch: the next
+        // batter's play appears (pitch_count_pa resets, batter changes) and the
+        // first-pitch prediction for the new PA must be written then.
+        const changed = !prevLs || tsChanged ||
+          prevLs.pitch_count_pa !== state.pitch_count_pa ||
+          prevLs.batter_id !== state.batter_id;
 
         const paPitches = currentPaPitches(pitches);
         const lsRow = {
@@ -137,6 +147,7 @@ Deno.serve(async (req) => {
           home_score: g.home_score, away_score: g.away_score,
           raw_json: {
             current_pa_pitches: paPitches,
+            current_pa_abi: latestAbIndex(pitches),
             away_team: g.away_team, home_team: g.home_team,
             away_abbr: g.away_abbr, home_abbr: g.home_abbr,
           },
@@ -149,6 +160,13 @@ Deno.serve(async (req) => {
         const pitchRows = pitches.filter((p) => p.at_bat_index != null && p.pitch_number != null);
         await upsertChunked("pitches", pitchRows as any, "game_pk,at_bat_index,pitch_number");
         await upsertChunked("at_bats", atBats.filter((a) => a.at_bat_index != null) as any, "game_pk,at_bat_index");
+
+        // The at-bat just ended (strikeout / walk / ball in play) and MLB has
+        // not posted the next play yet: there is no next pitch to predict for
+        // this PA, and the next batter is unknown. Ingest is done above; the
+        // first-pitch prediction for the new PA is written once its play
+        // appears (the changed-check fires on the batter/pitch-count reset).
+        if (currentPlay?.is_complete) continue;
 
         const pitcherId = state.pitcher_id as number | null;
         const batterId = state.batter_id as number | null;
@@ -169,8 +187,10 @@ Deno.serve(async (req) => {
         };
 
         const odds = await latestOdds(g.game_pk);
+        // Predictions belong to the PA the state describes — after a roll
+        // that is the NEW batter's at-bat (which may have no pitches yet).
+        const abi = currentPlay?.at_bat_index ?? latestAbIndex(pitches);
         const speed = predictPitchSpeed(models, ctx);
-        const abp = predictAbPitches(models, ctx);
         const pres = predictPitchResult(models, ctx);
         const abr = predictAbResult(models, ctx);
 
@@ -188,8 +208,26 @@ Deno.serve(async (req) => {
             recommendation: topClass(abr.probs), line: null, price: null,
             edge: null, model_version: abr.model_version,
           },
-          ouJoin(abp, (line) => pitchesOverProb(ctx.pitch_count_pa, abp.dist, abp.predicted_value!, line), odds["ab_pitches_ou"], true),
         ];
+
+        // Total-pitches is a PRE-at-bat call: write it once per PA (at 0-0)
+        // so the projection shown during the at-bat never drifts from the call
+        // made before it. The existence probe covers games picked up mid-PA.
+        let writeAbp = ctx.pitch_count_pa === 0;
+        if (!writeAbp && abi != null) {
+          const { data: abpExisting } = await db.from("predictions").select("id")
+            .eq("game_pk", g.game_pk).eq("market", "ab_pitches_ou")
+            .eq("at_bat_index", abi).limit(1);
+          writeAbp = !abpExisting?.length;
+        }
+        if (writeAbp) {
+          const abp = predictAbPitches(models, ctx);
+          marketRows.push(ouJoin(
+            abp,
+            (line) => pitchesOverProb(ctx.pitch_count_pa, abp.dist, abp.predicted_value!, line),
+            odds["ab_pitches_ou"], true,
+          ));
+        }
 
         // Moneyline: MLB live win prob vs freshest market quote.
         const homeProb = await liveHomeWinProb(g.game_pk);
@@ -224,7 +262,6 @@ Deno.serve(async (req) => {
         }
 
         // Persist the prediction batch at this PA position.
-        const abi = latestAbIndex(pitches);
         // Keep 0 (`|| null` would drop it): position 0 = the call on a PA's
         // first pitch, which the board matches by exact pitch position.
         const pnRaw = Number(state.pitch_count_pa);

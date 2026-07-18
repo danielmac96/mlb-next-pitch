@@ -151,12 +151,13 @@
       return `<span style="font-weight:600;color:${this.predColor(pred.resultOk, pending)};">${esc(label)}<span style="font-family:'IBM Plex Mono',monospace;font-size:.92em;">${esc(prob)}</span>${mark}</span>`;
     }
     // True when the last pitch ended the at-bat (ball in play, strike three,
-    // ball four) — the pending model call is then for the NEXT batter's first
-    // pitch, so the feed labels it that way instead of implying pitch N+1.
+    // ball four, HBP) — the pending model call is then for the NEXT batter's
+    // first pitch, so the feed labels it that way instead of implying pitch N+1.
     abLikelyOver(pitches) {
       const lp = pitches[pitches.length - 1];
       if (!lp) return false;
-      return lp.cat === "in_play" || (lp.balls || 0) >= 4 || (lp.strikes || 0) >= 3;
+      return lp.cat === "in_play" || lp.desc === "hit_by_pitch" ||
+        (lp.balls || 0) >= 4 || (lp.strikes || 0) >= 3;
     }
     liveGameOn(pk) { return this.state.liveGames[pk] !== false; }
     selLiveSourceSet() { const s = this.state.liveSources; return new Set(Object.keys(s).filter((k) => s[k])); }
@@ -478,12 +479,20 @@
         const spdLine = spd.predictedValue != null
           ? `<div style="display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-top:.45rem;"><span style="color:var(--faint);">Speed projection</span><b style="font-family:'IBM Plex Mono',monospace;font-weight:700;">${esc(Number(spd.predictedValue).toFixed(1))} mph${spd.line != null && spd.recommendation ? ` · ${esc(NP.OUTCOME_LABEL[spd.recommendation] || spd.recommendation)} ${esc(spd.line)}` : ""}</b></div>`
           : "";
-        const nextPitchBlock = (presRows || spdLine) ? `
+        // Say WHICH pitch the read is for, in the feed's numbering — pitch
+        // N+1 of this at-bat, or pitch #1 of the next batter once it ends.
+        const nextPitchTag = abOver ? "for pitch #1 · next batter" : `for pitch #${g.pitches.length + 1} of this at-bat`;
+        // The at-bat just ended and no next-batter read has landed yet: the
+        // latest model numbers still describe the FINISHED at-bat's next pitch
+        // (which will never come) — say so instead of showing them.
+        const readPending = abOver && !g.nextPred;
+        const nextPitchBlock = `
               <div style="margin-top:.9rem;padding-top:.75rem;border-top:1px solid var(--border);">
-                <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:.6rem;">Next pitch · model read</div>
-                ${presRows || `<div style="font-size:.8rem;color:var(--faint);font-style:italic;">Model read pending…</div>`}
-                ${spdLine}
-              </div>` : "";
+                <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:.6rem;">Next pitch · model read <span style="color:var(--accent);">${esc(nextPitchTag)}</span></div>
+                ${readPending
+                  ? `<div style="font-size:.8rem;color:var(--faint);font-style:italic;">At-bat over — the read on the next batter's first pitch arrives when they step in.</div>`
+                  : (presRows || `<div style="font-size:.8rem;color:var(--faint);font-style:italic;">Model read pending…</div>`) + spdLine}
+              </div>`;
 
         const abr = g.m.ab_result, abp = g.m.ab_pitches_ou;
         const order = ["out", "hit", "strikeout", "walk"];
@@ -593,14 +602,14 @@
                 ${pitchEmpty && !nextRow ? `<div style="padding:1rem .25rem;color:var(--faint);font-style:italic;font-size:.84rem;">Fresh at-bat — no pitches thrown yet.</div>` : pitchRows + nextRow}
                 <div style="font-size:.66rem;color:var(--faint);padding:.4rem .25rem 0;">xVelo / xResult — the model's call before each pitch · <span style="color:var(--good-strong);font-weight:700;">✓ right</span> / <span style="color:var(--bad);font-weight:700;">✗ wrong</span></div>
               </div></div>
-              <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-top:.85rem;padding-top:.7rem;border-top:1px solid var(--track);font-size:.8rem;color:var(--text-2);">
-                <div><span style="color:var(--faint);">Pitches (PA)</span> <b style="font-weight:700;">${esc(g.pitchCountPa)}</b></div>
-                <div><span style="color:var(--faint);">AB pitches proj</span> <b style="${abProjStyle}">${esc(abProj)}</b></div>
-              </div>
               ${nextPitchBlock}
               <div style="margin-top:.9rem;padding-top:.75rem;border-top:1px solid var(--border);">
-                <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:.6rem;">At-bat result · model probability</div>
+                <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:.6rem;">At-bat · model predictions</div>
                 ${abOutcomes}
+                <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-top:.6rem;padding-top:.55rem;border-top:1px solid var(--track);font-size:.8rem;color:var(--text-2);">
+                  <div><span style="color:var(--faint);">Total pitches · pre-AB call</span> <b style="${abProjStyle}">${esc(abProj)}</b></div>
+                  <div><span style="color:var(--faint);">Pitches so far (PA)</span> <b style="font-weight:700;">${esc(g.pitchCountPa)}</b></div>
+                </div>
               </div>
             </div>
 

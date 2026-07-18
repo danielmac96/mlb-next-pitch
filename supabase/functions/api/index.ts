@@ -149,7 +149,7 @@ async function live(): Promise<Response> {
   if (!states?.length) return json([]);
 
   const gamePks = states.map((s: any) => s.game_pk);
-  const [{ data: gameRows }, { data: playerRowsP }, { data: predRows }, { data: paPredRows }] = await Promise.all([
+  const [{ data: gameRows }, { data: playerRowsP }, { data: predRows }, { data: paPredRows }, { data: abpRows }] = await Promise.all([
     db.from("games").select("game_pk,home_team,away_team,home_abbr,away_abbr").in("game_pk", gamePks),
     db.from("player_info").select("player_id,full_name,pitch_hand,bat_side")
       .in("player_id", [
@@ -164,9 +164,29 @@ async function live(): Promise<Response> {
       .select("game_pk,at_bat_index,pitch_number,market,predicted_value,recommendation,line,confidence,probs,result")
       .in("game_pk", gamePks).in("market", ["pitch_result", "pitch_speed_ou"])
       .order("id", { ascending: false }).limit(gamePks.length * 40),
+    // ab_pitches_ou is written once per at-bat (pre-AB call) — in a long PA it
+    // falls outside the newest-rows window above, so fetch it directly.
+    db.from("predictions").select("*").in("game_pk", gamePks)
+      .eq("market", "ab_pitches_ou")
+      .order("id", { ascending: false }).limit(gamePks.length * 3),
   ]);
   const gamesBy = new Map((gameRows ?? []).map((g: any) => [g.game_pk, g]));
   const playersBy = new Map((playerRowsP ?? []).map((p: any) => [p.player_id, p]));
+
+  const marketOut = (p: any) => ({
+    market: p.market,
+    predicted_value: p.predicted_value != null ? Number(p.predicted_value) : null,
+    recommendation: p.recommendation,
+    line: p.line != null ? Number(p.line) : null,
+    price: p.price,
+    edge: p.edge != null ? Number(p.edge) : null,
+    confidence: p.confidence != null ? Number(p.confidence) : null,
+    probs: p.probs,
+    book: p.book ?? null,
+    model_version: p.model_version,
+    features_used: [],
+    sample_size: 0,
+  });
 
   const payloads = states.map((ls: any) => {
     const g: any = gamesBy.get(ls.game_pk) ?? {};
@@ -177,34 +197,25 @@ async function live(): Promise<Response> {
     for (const p of predRows ?? []) {
       if (p.game_pk !== ls.game_pk || seen.has(p.market)) continue;
       seen.add(p.market);
-      markets.push({
-        market: p.market,
-        predicted_value: p.predicted_value != null ? Number(p.predicted_value) : null,
-        recommendation: p.recommendation,
-        line: p.line != null ? Number(p.line) : null,
-        price: p.price,
-        edge: p.edge != null ? Number(p.edge) : null,
-        confidence: p.confidence != null ? Number(p.confidence) : null,
-        probs: p.probs,
-        book: p.book ?? null,
-        model_version: p.model_version,
-        features_used: [],
-        sample_size: 0,
-      });
+      markets.push(marketOut(p));
+    }
+    if (!seen.has("ab_pitches_ou")) {
+      const abp = (abpRows ?? []).find((p: any) => p.game_pk === ls.game_pk);
+      if (abp) { seen.add("ab_pitches_ou"); markets.push(marketOut(abp)); }
     }
     markets.sort((a, b) => (b.edge ?? -9) - (a.edge ?? -9));
-    // Prediction history for this game's current (= max scored) at-bat: newest
-    // row per (market, pitch position). pitch_number is the pitches-thrown
-    // count when the row was scored, i.e. it predicts pitch pitch_number + 1.
+    // Prediction history for the PA the pitch feed displays (raw.current_pa_abi):
+    // newest row per (market, pitch position). pitch_number is the pitches-
+    // thrown count when the row was scored, i.e. it predicts pitch_number + 1.
     const gamePreds = (paPredRows ?? []).filter((p: any) => p.game_pk === ls.game_pk && p.at_bat_index != null);
-    const curAbi = gamePreds.length ? Math.max(...gamePreds.map((p: any) => p.at_bat_index)) : null;
+    const maxAbi = gamePreds.length ? Math.max(...gamePreds.map((p: any) => p.at_bat_index)) : null;
+    const displayedAbi = raw.current_pa_abi ?? maxAbi;
+    const paPitchCount = (raw.current_pa_pitches ?? []).length;
     const seenPos = new Set<string>();
     const paPredictions: any[] = [];
-    for (const p of gamePreds) {
-      if (p.at_bat_index !== curAbi) continue;
-      const pos = p.pitch_number ?? 0;
+    const pushPred = (p: any, pos: number) => {
       const k = `${p.market}:${pos}`;
-      if (seenPos.has(k)) continue; // rows are newest-first; keep the freshest per position
+      if (seenPos.has(k)) return; // rows are newest-first; keep the freshest per position
       seenPos.add(k);
       paPredictions.push({
         market: p.market,
@@ -216,25 +227,22 @@ async function live(): Promise<Response> {
         probs: p.probs,
         result: p.result ?? null,
       });
-    }
-    // The call that predicted THIS at-bat's first pitch was written when the
-    // PREVIOUS at-bat ended, keyed under that at-bat's index — surface the
-    // newest such row per market as position 0 so pitch #1 gets graded too.
+    };
+    // Rows for the displayed PA, at their own pitch positions.
     for (const p of gamePreds) {
-      if (p.at_bat_index === curAbi) continue;
-      const k = `${p.market}:0`;
-      if (seenPos.has(k)) continue;
-      seenPos.add(k);
-      paPredictions.push({
-        market: p.market,
-        pitch_number: 0,
-        predicted_value: p.predicted_value != null ? Number(p.predicted_value) : null,
-        recommendation: p.recommendation,
-        line: p.line != null ? Number(p.line) : null,
-        confidence: p.confidence != null ? Number(p.confidence) : null,
-        probs: p.probs,
-        result: p.result ?? null,
-      });
+      if (p.at_bat_index === displayedAbi) pushPred(p, p.pitch_number ?? 0);
+    }
+    // The displayed PA has ended and the model already reads the NEXT batter's
+    // first pitch (rows keyed to the next at-bat, position 0) — surface those
+    // at the board's "next pitch" slot (= pitches thrown in the displayed PA).
+    for (const p of gamePreds) {
+      if (displayedAbi != null && p.at_bat_index === displayedAbi + 1) pushPred(p, paPitchCount);
+    }
+    // Legacy rows (pre-roll data model): the call that predicted this PA's
+    // first pitch was keyed under the PREVIOUS at-bat — surface as position 0
+    // so pitch #1 still grades.
+    for (const p of gamePreds) {
+      if (displayedAbi != null && p.at_bat_index < displayedAbi) pushPred(p, 0);
     }
     paPredictions.sort((a, b) => a.pitch_number - b.pitch_number);
     const edges = markets.map((m) => m.edge).filter((e) => e != null) as number[];
@@ -357,9 +365,13 @@ async function record(): Promise<Response> {
 // breakdown, in the shape the live board's edge tab consumes.
 async function edge(gamePk: number): Promise<Response> {
   const db = svc();
-  const [{ data: preds }, { data: oddsRows }] = await Promise.all([
+  const [{ data: preds }, { data: abpPreds }, { data: oddsRows }] = await Promise.all([
     db.from("predictions").select("*").eq("game_pk", gamePk)
       .order("id", { ascending: false }).limit(30),
+    // ab_pitches_ou is written once per at-bat (pre-AB call) and can fall
+    // outside the newest-30 window during a long PA — fetch it directly.
+    db.from("predictions").select("*").eq("game_pk", gamePk)
+      .eq("market", "ab_pitches_ou").order("id", { ascending: false }).limit(1),
     db.from("odds")
       .select("market,outcome,line,over_price,under_price,price_american,implied_prob,novig_prob,source,fetched_at")
       .eq("game_pk", gamePk)
@@ -379,7 +391,7 @@ async function edge(gamePk: number): Promise<Response> {
 
   const rows: any[] = [];
   const seenM = new Set<string>();
-  for (const p of preds ?? []) {
+  for (const p of [...(preds ?? []), ...(abpPreds ?? [])]) {
     if (seenM.has(p.market)) continue;
     seenM.add(p.market);
     const quotes = latest.filter((q) => q.market === p.market);
