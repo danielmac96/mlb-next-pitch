@@ -17,7 +17,7 @@ class _StubStatsCache:
         return None
 
 
-def _setup(monkeypatch, stub_predictor_cache, states):
+def _setup(monkeypatch, stub_predictor_cache, states, fake_client=None):
     from backend.api.routes import live as mod
 
     mod._payload_cache.clear()  # avoid cross-test bleed via the module-level cache
@@ -25,8 +25,9 @@ def _setup(monkeypatch, stub_predictor_cache, states):
     store = LiveStore()
     for s in states:
         store.update(s["game_pk"], s, [])
+    fake = fake_client or FakeSupabaseClient()
     monkeypatch.setattr(mod, "get_store", lambda: store)
-    monkeypatch.setattr(mod, "get_client", lambda: FakeSupabaseClient())
+    monkeypatch.setattr(mod, "get_client", lambda: fake)
     monkeypatch.setattr(mod, "get_cache", lambda: _StubStatsCache())
     monkeypatch.setattr(mod, "current_pa_position", lambda game_pk: (None, None))
     monkeypatch.setattr(mod, "insert_predictions", lambda *a, **k: None)
@@ -75,6 +76,45 @@ def test_live_payload_cache_skips_rebuild_when_last_pitch_ts_unchanged(monkeypat
     assert 1 in mod._payload_cache
     second = client.get("/live/1").json()
     assert first["markets"] == second["markets"]
+
+
+def test_live_pa_predictions_carries_current_position_from_request(monkeypatch, stub_predictor_cache):
+    # No audit rows in the fake DB: pa_predictions must still expose the
+    # in-request pitch_result + pitch_speed_ou calls at the current position
+    # (pitch_count_pa = 2, i.e. predicting pitch 3), ungraded.
+    client, _ = _setup(monkeypatch, stub_predictor_cache, [_state(1)])
+    body = client.get("/live/1").json()
+    preds = body["pa_predictions"]
+    assert {p["market"] for p in preds} == {"pitch_result", "pitch_speed_ou"}
+    assert all(p["pitch_number"] == 2 for p in preds)
+    assert all(p["result"] is None for p in preds)
+    pres = next(p for p in preds if p["market"] == "pitch_result")
+    assert pres["recommendation"] in pres["probs"]
+
+
+def test_live_pa_predictions_filters_to_current_ab_and_dedupes(monkeypatch, stub_predictor_cache):
+    fake = FakeSupabaseClient()
+    fake.seed("predictions", [
+        # previous at-bat: must be dropped
+        {"game_pk": 1, "at_bat_index": 4, "pitch_number": 3, "market": "pitch_result",
+         "recommendation": "ball", "probs": {"ball": 0.5}, "result": "win"},
+        # current at-bat, stale row at position 1 superseded by a newer one
+        {"game_pk": 1, "at_bat_index": 5, "pitch_number": 1, "market": "pitch_result",
+         "recommendation": "ball", "probs": {"ball": 0.4}, "result": None},
+        {"game_pk": 1, "at_bat_index": 5, "pitch_number": 1, "market": "pitch_result",
+         "recommendation": "strike_foul", "probs": {"strike_foul": 0.55}, "result": "loss"},
+        {"game_pk": 1, "at_bat_index": 5, "pitch_number": 1, "market": "pitch_speed_ou",
+         "predicted_value": 94.2, "recommendation": "under", "line": 94.5, "result": "win"},
+    ])
+    client, _ = _setup(monkeypatch, stub_predictor_cache, [_state(1)], fake_client=fake)
+    preds = client.get("/live/1").json()["pa_predictions"]
+    pos1 = [p for p in preds if p["pitch_number"] == 1]
+    assert {p["market"] for p in pos1} == {"pitch_result", "pitch_speed_ou"}
+    assert next(p for p in pos1 if p["market"] == "pitch_result")["recommendation"] == "strike_foul"
+    assert next(p for p in pos1 if p["market"] == "pitch_speed_ou")["result"] == "win"
+    assert not any(p["pitch_number"] == 3 for p in preds if p.get("result") == "win" and p["market"] == "pitch_result")
+    # current in-request position is still appended on top of the history
+    assert any(p["pitch_number"] == 2 for p in preds)
 
 
 def test_live_returns_404_for_a_game_pk_with_no_live_state(monkeypatch, stub_predictor_cache):

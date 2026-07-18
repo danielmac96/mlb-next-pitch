@@ -122,6 +122,26 @@
       const r = Math.round(245 + (220 - 245) * t), g = Math.round(158 + (38 - 158) * t), b = Math.round(11 + (38 - 11) * t);
       return `rgb(${r},${g},${b})`;
     }
+    // Model pre-pitch call cells: graded green/red once the pitch has landed,
+    // accent while the call is still pending (the upcoming pitch), faint when
+    // the model had no read at that position.
+    predColor(ok, pending) {
+      if (ok === true) return "var(--good-strong)";
+      if (ok === false) return "var(--bad)";
+      return pending ? "var(--accent)" : "var(--faint)";
+    }
+    predVeloHtml(pred, pending) {
+      if (!pred || pred.speed == null) return `<span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">—</span>`;
+      const mark = pred.speedOk === true ? " ✓" : pred.speedOk === false ? " ✗" : "";
+      return `<span style="font-family:'IBM Plex Mono',monospace;font-weight:600;color:${this.predColor(pred.speedOk, pending)};">${esc(pred.speed.toFixed(1))}${mark}</span>`;
+    }
+    predResultHtml(pred, pending) {
+      if (!pred || !pred.resultCat) return `<span style="color:var(--faint);">—</span>`;
+      const label = NP.OUTCOME_LABEL[pred.resultCat] || pred.resultCat;
+      const prob = pred.resultProb != null ? ` ${Math.round(pred.resultProb * 100)}%` : "";
+      const mark = pred.resultOk === true ? " ✓" : pred.resultOk === false ? " ✗" : "";
+      return `<span style="font-weight:600;color:${this.predColor(pred.resultOk, pending)};">${esc(label)}<span style="font-family:'IBM Plex Mono',monospace;font-size:.92em;">${esc(prob)}</span>${mark}</span>`;
+    }
     liveGameOn(pk) { return this.state.liveGames[pk] !== false; }
     selLiveSourceSet() { const s = this.state.liveSources; return new Set(Object.keys(s).filter((k) => s[k])); }
 
@@ -384,6 +404,7 @@
         }).join("");
         const typeLegend = typesSeen.map((t) => `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.72rem;color:var(--text-2);"><span style="width:9px;height:9px;border-radius:50%;background:${this.pitchColor(t)};flex:none;"></span>${esc(t)}</span>`).join("");
 
+        const feedGrid = "28px 44px 48px 56px minmax(80px,1fr) minmax(104px,1.15fr) 42px";
         const pitchEmpty = g.pitches.length === 0;
         const pitchRows = g.pitches.map((pt) => {
           const rm = this.resultMeta(pt.desc);
@@ -392,14 +413,28 @@
             ? `font-family:'IBM Plex Mono',monospace;font-weight:600;color:${this.veloColor(pt.speed)};`
             : `font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--faint);`;
           return `
-          <div style="display:grid;grid-template-columns:28px 48px 52px minmax(90px,1fr) 52px;gap:.35rem;align-items:center;padding:.42rem .25rem;border-bottom:1px solid var(--row-border);font-size:.8rem;">
+          <div style="display:grid;grid-template-columns:${feedGrid};gap:.35rem;align-items:center;padding:.42rem .25rem;border-bottom:1px solid var(--row-border);font-size:.8rem;">
             <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">${esc(pt.n)}</span>
             <span style="font-weight:700;color:${this.pitchColor(pt.type)};">${esc(pt.type)}</span>
             <span style="${veloStyle}">${esc(speedText)}</span>
+            ${this.predVeloHtml(pt.pred, false)}
             <span style="color:${rm[1]};font-weight:600;">${esc(rm[0])}</span>
+            ${this.predResultHtml(pt.pred, false)}
             <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);text-align:right;">${esc(pt.balls)}-${esc(pt.strikes)}</span>
           </div>`;
         }).join("");
+        // The upcoming pitch's row: the model's call sits where the pitch data
+        // will land; it turns green/red above once the pitch is thrown.
+        const nextRow = g.nextPred ? `
+          <div style="display:grid;grid-template-columns:${feedGrid};gap:.35rem;align-items:center;padding:.42rem .25rem;border-bottom:1px solid var(--row-border);font-size:.8rem;background:var(--surface-2);">
+            <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">${esc(g.pitches.length + 1)}</span>
+            <span style="color:var(--faint);font-style:italic;">next</span>
+            <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">—</span>
+            ${this.predVeloHtml(g.nextPred, true)}
+            <span style="color:var(--faint);font-style:italic;">up next</span>
+            ${this.predResultHtml(g.nextPred, true)}
+            <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);text-align:right;">${esc(g.count)}</span>
+          </div>` : "";
 
         // Next-pitch model read: the model predicts the UPCOMING pitch (result
         // distribution + speed projection) — rendered per game, not per past
@@ -529,11 +564,12 @@
                 <span style="font-weight:800;font-size:1rem;">Pitch feed</span>
                 <span style="font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);">This at-bat</span>
               </div>
-              <div style="overflow-x:auto;"><div style="min-width:300px;">
-                <div style="display:grid;grid-template-columns:28px 48px 52px minmax(90px,1fr) 52px;gap:.35rem;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;padding:0 .25rem .4rem;border-bottom:1px solid var(--border);">
-                  <span>#</span><span>Type</span><span>Velo</span><span>Result</span><span style="text-align:right;">Count</span>
+              <div style="overflow-x:auto;"><div style="min-width:460px;">
+                <div style="display:grid;grid-template-columns:${feedGrid};gap:.35rem;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;padding:0 .25rem .4rem;border-bottom:1px solid var(--border);">
+                  <span>#</span><span>Type</span><span>Velo</span><span>xVelo</span><span>Result</span><span>xResult</span><span style="text-align:right;">Count</span>
                 </div>
-                ${pitchEmpty ? `<div style="padding:1rem .25rem;color:var(--faint);font-style:italic;font-size:.84rem;">Fresh at-bat — no pitches thrown yet.</div>` : pitchRows}
+                ${pitchEmpty && !nextRow ? `<div style="padding:1rem .25rem;color:var(--faint);font-style:italic;font-size:.84rem;">Fresh at-bat — no pitches thrown yet.</div>` : pitchRows + nextRow}
+                <div style="font-size:.66rem;color:var(--faint);padding:.4rem .25rem 0;">xVelo / xResult — the model's call before each pitch · <span style="color:var(--good-strong);font-weight:700;">✓ right</span> / <span style="color:var(--bad);font-weight:700;">✗ wrong</span></div>
               </div></div>
               <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-top:.85rem;padding-top:.7rem;border-top:1px solid var(--track);font-size:.8rem;color:var(--text-2);">
                 <div><span style="color:var(--faint);">Pitches (PA)</span> <b style="font-weight:700;">${esc(g.pitchCountPa)}</b></div>
@@ -600,19 +636,33 @@
         return `<button data-act="feedGame" data-arg="${g.gamePk}" style="${style}"><span style="${dot}"></span>${esc(g.label)}</button>`;
       }).join("");
 
+      const dataGrid = "38px 56px 64px 60px 46px 1fr minmax(112px,1fr) 56px";
       const pitchEmpty = sel.pitches.length === 0;
       const pitchRows = sel.pitches.map((p) => {
         const [label, tone] = this.resultMeta(p.desc);
         const speedText = p.speed != null ? p.speed.toFixed(1) : "—";
-        return `<div style="display:grid;grid-template-columns:38px 56px 64px 46px 1fr 56px;gap:.4rem;align-items:center;padding:.42rem .3rem;border-bottom:1px solid var(--row-border);font-size:.84rem;">
+        return `<div style="display:grid;grid-template-columns:${dataGrid};gap:.4rem;align-items:center;padding:.42rem .3rem;border-bottom:1px solid var(--row-border);font-size:.84rem;">
           <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">${esc(p.n)}</span>
           <span style="font-weight:600;">${esc(p.type)}</span>
           <span style="font-family:'IBM Plex Mono',monospace;color:var(--text-2);">${esc(speedText)}</span>
+          ${this.predVeloHtml(p.pred, false)}
           <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">${esc(p.zone)}</span>
           <span style="color:${tone};font-weight:600;">${esc(label)}</span>
+          ${this.predResultHtml(p.pred, false)}
           <span style="font-family:'IBM Plex Mono',monospace;color:var(--text-2);text-align:right;">${esc(p.balls)}-${esc(p.strikes)}</span>
         </div>`;
       }).join("");
+      const nextRow = sel.nextPred ? `
+        <div style="display:grid;grid-template-columns:${dataGrid};gap:.4rem;align-items:center;padding:.42rem .3rem;border-bottom:1px solid var(--row-border);font-size:.84rem;background:var(--surface-2);">
+          <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">${esc(sel.pitches.length + 1)}</span>
+          <span style="color:var(--faint);font-style:italic;">next</span>
+          <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">—</span>
+          ${this.predVeloHtml(sel.nextPred, true)}
+          <span style="font-family:'IBM Plex Mono',monospace;color:var(--faint);">—</span>
+          <span style="color:var(--faint);font-style:italic;">up next</span>
+          ${this.predResultHtml(sel.nextPred, true)}
+          <span style="font-family:'IBM Plex Mono',monospace;color:var(--text-2);text-align:right;">${esc(sel.count)}</span>
+        </div>` : "";
 
       const abr = sel.m.ab_result, abp = sel.m.ab_pitches_ou;
       const abProj = abp.line != null
@@ -728,11 +778,12 @@
             <div style="font-weight:800;font-size:1rem;">${esc(sel.label)}</div>
             <span style="font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);">This at-bat</span>
           </div>
-          <div style="overflow-x:auto;"><div style="min-width:400px;">
-            <div style="display:grid;grid-template-columns:38px 56px 64px 46px 1fr 56px;gap:.4rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:0 .3rem .4rem;border-bottom:1px solid var(--border);">
-              <span>#</span><span>Type</span><span>Velo</span><span>Zone</span><span>Result</span><span style="text-align:right;">Count</span>
+          <div style="overflow-x:auto;"><div style="min-width:560px;">
+            <div style="display:grid;grid-template-columns:${dataGrid};gap:.4rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:0 .3rem .4rem;border-bottom:1px solid var(--border);">
+              <span>#</span><span>Type</span><span>Velo</span><span>xVelo</span><span>Zone</span><span>Result</span><span>xResult</span><span style="text-align:right;">Count</span>
             </div>
-            ${pitchEmpty ? `<div style="padding:1.1rem .3rem;color:var(--faint);font-style:italic;font-size:.84rem;">Fresh at-bat — no pitches thrown yet.</div>` : pitchRows}
+            ${pitchEmpty && !nextRow ? `<div style="padding:1.1rem .3rem;color:var(--faint);font-style:italic;font-size:.84rem;">Fresh at-bat — no pitches thrown yet.</div>` : pitchRows + nextRow}
+            <div style="font-size:.66rem;color:var(--faint);padding:.4rem .3rem 0;">xVelo / xResult — the model's call before each pitch · <span style="color:var(--good-strong);font-weight:700;">✓ right</span> / <span style="color:var(--bad);font-weight:700;">✗ wrong</span></div>
           </div></div>
           <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--track);font-size:.78rem;color:var(--text-2);">
             <div><span style="color:var(--faint);">Pitches (PA)</span> <b style="font-weight:700;">${esc(sel.pitchCountPa)}</b></div>

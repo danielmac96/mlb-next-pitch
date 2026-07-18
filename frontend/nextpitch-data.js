@@ -509,6 +509,48 @@ window.NEXTPITCH = (function () {
     };
   }
 
+  // ── per-pitch prediction join ───────────────────────────────────────────
+  // /live's pa_predictions carries the model's pre-pitch calls for the current
+  // PA: a row at pitch_number k was scored after k pitches, i.e. it predicts
+  // pitch k+1. Group rows by that position so each thrown pitch can be paired
+  // with the call made before it, and the newest position becomes the read on
+  // the upcoming (not yet thrown) pitch.
+  function paPredsByPos(rows) {
+    const byPos = {};
+    (rows || []).forEach((r) => {
+      if (!r || !r.market) return;
+      const pos = r.pitch_number != null ? r.pitch_number : 0;
+      const slot = byPos[pos] || (byPos[pos] = {});
+      if (r.market === "pitch_result") slot.result = r;
+      else if (r.market === "pitch_speed_ou") slot.speed = r;
+    });
+    return byPos;
+  }
+  // Shape one position's prediction pair for rendering; when the actual pitch
+  // is known, grade each call with the same rules the settle job uses
+  // (result: predicted class vs result_category; speed: over/under the line).
+  function gradedPred(slot, actual) {
+    if (!slot || (!slot.result && !slot.speed)) return null;
+    const rp = slot.result, sp = slot.speed;
+    const out = {
+      resultCat: rp ? rp.recommendation : null,
+      resultProb: rp && rp.probs && rp.recommendation != null && rp.probs[rp.recommendation] != null
+        ? +rp.probs[rp.recommendation] : (rp && rp.confidence != null ? +rp.confidence : null),
+      resultOk: null,
+      speed: sp && sp.predicted_value != null ? +sp.predicted_value : null,
+      speedRec: sp ? sp.recommendation : null,
+      speedLine: sp && sp.line != null ? +sp.line : null,
+      speedOk: null,
+    };
+    if (actual) {
+      if (out.resultCat && actual.cat) out.resultOk = out.resultCat === actual.cat;
+      if (out.speedRec && out.speedLine != null && actual.speed != null) {
+        out.speedOk = (actual.speed > out.speedLine ? "over" : "under") === out.speedRec;
+      }
+    }
+    return out;
+  }
+
   function normalizeGame(lg, edgeRows) {
     const sit = lg.situation || {};
     const edgeByMarket = {};
@@ -539,6 +581,13 @@ window.NEXTPITCH = (function () {
       balls: p.balls || 0, strikes: p.strikes || 0,
     }));
 
+    // Pair each thrown pitch with the model call made before it (position
+    // n-1 predicts pitch n) and grade it; the call at the current position is
+    // the pending read on the next pitch.
+    const predPos = paPredsByPos(lg.pa_predictions);
+    pitches.forEach((pt) => { pt.pred = gradedPred(predPos[(pt.n || 0) - 1], pt); });
+    const nextPred = gradedPred(predPos[pitches.length], null);
+
     let stale = false;
     if (sit.last_pitch_ts) {
       const age = Date.now() - Date.parse(sit.last_pitch_ts);
@@ -559,7 +608,7 @@ window.NEXTPITCH = (function () {
       outs: sit.outs || 0,
       runners: { first: false, second: false, third: false },
       pitchCountPa: sit.pitch_count_pa != null ? sit.pitch_count_pa : pitches.length,
-      pitchCountGame: null, pitches, lastPitch: sit.last_pitch_ts, stale, m,
+      pitchCountGame: null, pitches, nextPred, lastPitch: sit.last_pitch_ts, stale, m,
       modelVersion: lg.model_version || null,
     };
   }

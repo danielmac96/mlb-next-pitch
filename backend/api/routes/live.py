@@ -126,6 +126,63 @@ def _market_sort_key(m: dict):
     return (edge is None, -(edge or 0.0))
 
 
+def _pa_predictions(game_pk: int, ls: dict, markets: list[dict]) -> list[dict]:
+    """Per-pitch prediction history for the current PA (pitch_result +
+    pitch_speed_ou), matching the hosted api fn's contract: pitch_number is the
+    pitches-thrown count when the row was scored, so it predicts pitch
+    pitch_number + 1. Past positions come from the predictions audit table;
+    the current position comes from the fresher in-request markets (the audit
+    write is fire-and-forget and may not have landed yet)."""
+    by_pos: dict[tuple[str, int], dict] = {}
+    try:
+        rows = (
+            get_client().table("predictions")
+            .select("at_bat_index,pitch_number,market,predicted_value,recommendation,line,confidence,probs,result")
+            .eq("game_pk", game_pk)
+            .in_("market", ["pitch_result", "pitch_speed_ou"])
+            .order("id", desc=True)
+            .limit(40)
+            .execute().data
+            or []
+        )
+    except Exception as exc:
+        print(f"[live] pa_predictions failed game={game_pk}: {exc}")
+        rows = []
+    cur_abi = max((r["at_bat_index"] for r in rows if r.get("at_bat_index") is not None), default=None)
+    for r in rows:
+        if cur_abi is None or r.get("at_bat_index") != cur_abi:
+            continue
+        pos = r.get("pitch_number") or 0
+        key = (r["market"], pos)
+        if key in by_pos:  # rows are newest-first; keep the freshest per position
+            continue
+        by_pos[key] = {
+            "market": r["market"],
+            "pitch_number": pos,
+            "predicted_value": r.get("predicted_value"),
+            "recommendation": r.get("recommendation"),
+            "line": r.get("line"),
+            "confidence": r.get("confidence"),
+            "probs": r.get("probs"),
+            "result": r.get("result"),
+        }
+    pos_now = int(ls.get("pitch_count_pa") or 0)
+    for m in markets:
+        if m["market"] not in ("pitch_result", "pitch_speed_ou"):
+            continue
+        by_pos[(m["market"], pos_now)] = {
+            "market": m["market"],
+            "pitch_number": pos_now,
+            "predicted_value": m.get("predicted_value"),
+            "recommendation": m.get("recommendation"),
+            "line": m.get("line"),
+            "confidence": m.get("confidence"),
+            "probs": m.get("probs"),
+            "result": None,
+        }
+    return sorted(by_pos.values(), key=lambda r: r["pitch_number"])
+
+
 def _build_game_payload(ls: dict) -> dict:
     # Import here to avoid a circular import between main.py and live.py.
     from backend.api.main import get_game_label
@@ -188,6 +245,7 @@ def _build_game_payload(ls: dict) -> dict:
         "batter_name": _player_name(ls.get("batter_id")),
         "situation": _situation(ls),
         "current_pa_pitches": current_pa_pitches,
+        "pa_predictions": _pa_predictions(game_pk, ls, markets),
         "markets": markets,
         "has_edge": has_edge,
         "top_edge": top_edge,

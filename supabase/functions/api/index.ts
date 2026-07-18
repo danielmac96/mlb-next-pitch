@@ -149,7 +149,7 @@ async function live(): Promise<Response> {
   if (!states?.length) return json([]);
 
   const gamePks = states.map((s: any) => s.game_pk);
-  const [{ data: gameRows }, { data: playerRowsP }, { data: predRows }] = await Promise.all([
+  const [{ data: gameRows }, { data: playerRowsP }, { data: predRows }, { data: paPredRows }] = await Promise.all([
     db.from("games").select("game_pk,home_team,away_team,home_abbr,away_abbr").in("game_pk", gamePks),
     db.from("player_info").select("player_id,full_name,pitch_hand,bat_side")
       .in("player_id", [
@@ -157,6 +157,13 @@ async function live(): Promise<Response> {
       ]),
     db.from("predictions").select("*").in("game_pk", gamePks)
       .order("id", { ascending: false }).limit(gamePks.length * 24),
+    // Per-pitch prediction history for the current PA: one pitch_result +
+    // pitch_speed_ou row per pitch state, so the board can show what the model
+    // called before each pitch and grade it against what actually happened.
+    db.from("predictions")
+      .select("game_pk,at_bat_index,pitch_number,market,predicted_value,recommendation,line,confidence,probs,result")
+      .in("game_pk", gamePks).in("market", ["pitch_result", "pitch_speed_ou"])
+      .order("id", { ascending: false }).limit(gamePks.length * 40),
   ]);
   const gamesBy = new Map((gameRows ?? []).map((g: any) => [g.game_pk, g]));
   const playersBy = new Map((playerRowsP ?? []).map((p: any) => [p.player_id, p]));
@@ -186,6 +193,31 @@ async function live(): Promise<Response> {
       });
     }
     markets.sort((a, b) => (b.edge ?? -9) - (a.edge ?? -9));
+    // Prediction history for this game's current (= max scored) at-bat: newest
+    // row per (market, pitch position). pitch_number is the pitches-thrown
+    // count when the row was scored, i.e. it predicts pitch pitch_number + 1.
+    const gamePreds = (paPredRows ?? []).filter((p: any) => p.game_pk === ls.game_pk && p.at_bat_index != null);
+    const curAbi = gamePreds.length ? Math.max(...gamePreds.map((p: any) => p.at_bat_index)) : null;
+    const seenPos = new Set<string>();
+    const paPredictions: any[] = [];
+    for (const p of gamePreds) {
+      if (p.at_bat_index !== curAbi) continue;
+      const pos = p.pitch_number ?? 0;
+      const k = `${p.market}:${pos}`;
+      if (seenPos.has(k)) continue; // rows are newest-first; keep the freshest per position
+      seenPos.add(k);
+      paPredictions.push({
+        market: p.market,
+        pitch_number: pos,
+        predicted_value: p.predicted_value != null ? Number(p.predicted_value) : null,
+        recommendation: p.recommendation,
+        line: p.line != null ? Number(p.line) : null,
+        confidence: p.confidence != null ? Number(p.confidence) : null,
+        probs: p.probs,
+        result: p.result ?? null,
+      });
+    }
+    paPredictions.sort((a, b) => a.pitch_number - b.pitch_number);
     const edges = markets.map((m) => m.edge).filter((e) => e != null) as number[];
     const topEdge = edges.length ? Math.max(...edges) : 0;
     const pitcher: any = playersBy.get(ls.pitcher_id);
@@ -212,6 +244,7 @@ async function live(): Promise<Response> {
         away_score: ls.away_score,
       },
       current_pa_pitches: raw.current_pa_pitches ?? [],
+      pa_predictions: paPredictions,
       markets,
       has_edge: topEdge > 0.05,
       top_edge: topEdge,
