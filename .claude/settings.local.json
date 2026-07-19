@@ -86,7 +86,12 @@
       "Bash(node -e ' *)",
       "Bash(node --check dist/nextpitch.js)",
       "Bash(node --check dist/nextpitch-data.js)",
-      "Bash(node --check dist/config.js)"
+      "Bash(node --check dist/config.js)",
+      "Read(//c/Users/danie/.claude/skills/**)",
+      "Read(//c/Users/danie/.claude/plugins/**)",
+      "Read(//c/Users/danie/.claude/**)",
+      "Bash(npx --yes skills find graphify)",
+      "Bash(npx --yes skills add safishamsi/graphify@graphify -g -y)"
     ]
   },
   "enabledMcpjsonServers": [
