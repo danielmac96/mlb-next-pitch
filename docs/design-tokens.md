@@ -1,8 +1,8 @@
-# NextPitch design tokens & thesis
+# Pitch Hawk design tokens & thesis
 
 ## Thesis
 
-NextPitch is a **second-screen live companion for the sports analytics
+Pitch Hawk is a **second-screen live companion for the sports analytics
 enthusiast** — a fan watching the game on TV with their phone in hand,
 checking what the model says about the next pitch. That dictates three
 things: the phone layout is the primary layout (desktop is the
@@ -17,8 +17,8 @@ green fields, no gold, no red/black), and not an AI-default look either.
 
 ## Tokens
 
-The palette lives as CSS custom properties on `.np-root`
-(`frontend/nextpitch.css`); `[data-theme="dark"]` flips the whole board via
+The palette lives as CSS custom properties on `.ph-root`
+(`frontend/pitchhawk.css`); `[data-theme="dark"]` flips the whole board via
 one attribute. Values below are the light theme (dark equivalents in the
 stylesheet).
 
@@ -59,7 +59,7 @@ soft (`0 1px 2px` + `0 6px 16px` at ≤ 9% opacity) — lift, not chrome.
 
 ### Signature element
 
-The pulsing green live dot (`np-pulse`) next to the ◆ wordmark, echoed by
+The pulsing green live dot (`ph-pulse`) next to the ◆ wordmark, echoed by
 the green "next pitch" accent bar in the feed — the brand gesture is "the
 board is alive." Disabled under `prefers-reduced-motion`.
 
@@ -70,11 +70,11 @@ Breakpoints: **768px** (bottom tab bar → header pill nav; hero/panels
 split) and **900px** (promo splits). Verified at 360 / 390 / 768 / 1024 /
 1440.
 
-- `.np-nav`: fixed bottom tab bar under 768px (48px targets,
+- `.ph-nav`: fixed bottom tab bar under 768px (48px targets,
   `safe-area-inset-bottom`); header pill row above.
-- `.np-hero` / `.np-promo` / `.np-panel-grid`: single column on phones.
-- `.np-chip`: 42px minimum touch height on phones.
-- `.np-scroll`: wide tables scroll inside their card — the page itself
+- `.ph-hero` / `.ph-promo` / `.ph-panel-grid`: single column on phones.
+- `.ph-chip`: 42px minimum touch height on phones.
+- `.ph-scroll`: wide tables scroll inside their card — the page itself
   never scrolls horizontally (fixed-width grids are guarded with
   `minmax(min(Npx, 100%), 1fr)`).
 - `viewport-fit=cover` + `env(safe-area-inset-*)` on nav and footer.

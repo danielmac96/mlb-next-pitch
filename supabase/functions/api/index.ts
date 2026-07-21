@@ -1,4 +1,4 @@
-// Public read-only API for the NextPitch frontend. Mirrors the FastAPI
+// Public read-only API for the Pitch Hawk frontend. Mirrors the FastAPI
 // contract (GET /live, /picks/today, /record, /sportsbooks, /games, /health,
 // POST /track/click) so the static frontend can point PITCH_EDGE_API at
 // https://<ref>.functions.supabase.co/api and work unchanged.

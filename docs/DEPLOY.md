@@ -1,4 +1,4 @@
-# Deploying NextPitch
+# Deploying Pitch Hawk
 
 The production system runs **entirely on Supabase**: Postgres stores every
 table, edge functions do all data collection and prediction, and pg_cron

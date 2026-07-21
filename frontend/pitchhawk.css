@@ -1,17 +1,17 @@
 /* ============================================================
-   NextPitch — live edge board (rebuilt from the DC design ref).
-   Palette lives entirely in CSS custom properties on .np-root and
+   Pitch Hawk — live edge board (rebuilt from the DC design ref).
+   Palette lives entirely in CSS custom properties on .ph-root and
    is flipped by [data-theme="dark"], so one attribute reflows the
-   whole board. Component markup is generated in nextpitch.js with
+   whole board. Component markup is generated in pitchhawk.js with
    inline styles that read these tokens (a faithful port of the DC).
    ============================================================ */
 
 * { box-sizing: border-box; }
 body { margin: 0; }
 
-@keyframes np-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes ph-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
-.np-root {
+.ph-root {
   --bg:#f5f7fb; --surface:#ffffff; --surface-2:#f6f8fc;
   --header-bg:rgba(255,255,255,.88);
   --border:#e6eaf1; --border-2:#d6deea; --track:#eef1f7; --row-border:#f0f3f8;
@@ -34,7 +34,7 @@ body { margin: 0; }
   transition: background-color .22s ease, color .22s ease;
 }
 
-.np-root[data-theme="dark"] {
+.ph-root[data-theme="dark"] {
   --bg:#0c1424; --surface:#141f33; --surface-2:#101b2e;
   --header-bg:rgba(12,20,36,.85);
   --border:#253449; --border-2:#31435f; --track:#1b2942; --row-border:#1a2740;
@@ -49,8 +49,8 @@ body { margin: 0; }
 
 /* Hover lift for edge/market cards (the DC used a style-hover attribute; here
    it's a class the JS applies to interactive cards). */
-.np-card-hover { transition: box-shadow .15s, border-color .15s; }
-.np-card-hover:hover {
+.ph-card-hover { transition: box-shadow .15s, border-color .15s; }
+.ph-card-hover:hover {
   border-color: var(--border-2) !important;
   box-shadow: 0 2px 4px rgba(15,27,45,.07), 0 14px 34px rgba(15,27,45,.09) !important;
 }
@@ -59,10 +59,10 @@ body { margin: 0; }
    Responsive layout — mobile-first. Base rules are the phone
    layout; min-width queries layer the desktop refinements back
    on. Layout-critical containers use these classes; decorative
-   styling stays inline in nextpitch.js.
+   styling stays inline in pitchhawk.js.
    ============================================================ */
 
-.np-main {
+.ph-main {
   width: min(1220px, 95vw);
   margin: 0 auto;
   /* room for the fixed bottom tab bar + home-indicator inset */
@@ -71,7 +71,7 @@ body { margin: 0; }
   align-self: stretch;
 }
 
-.np-header-inner {
+.ph-header-inner {
   width: min(1220px, 95vw);
   margin: 0 auto;
   display: flex;
@@ -80,10 +80,10 @@ body { margin: 0; }
   flex-wrap: wrap;
   padding: .55rem 0;
 }
-.np-header-inner .np-icon-btn { margin-left: auto; }
+.ph-header-inner .ph-icon-btn { margin-left: auto; }
 
 /* Tab nav: fixed bottom bar on phones, header pill row on md+. */
-.np-nav {
+.ph-nav {
   position: fixed;
   bottom: 0; left: 0; right: 0;
   z-index: 60;
@@ -97,7 +97,7 @@ body { margin: 0; }
            calc(.35rem + env(safe-area-inset-bottom))
            max(.5rem, env(safe-area-inset-left));
 }
-.np-tab {
+.ph-tab {
   flex: 1;
   min-height: 48px; /* touch target */
   border: 0;
@@ -111,12 +111,12 @@ body { margin: 0; }
   background: transparent;
   color: var(--muted);
 }
-.np-tab-on {
+.ph-tab-on {
   background: var(--pill-active-bg);
   color: var(--pill-active-fg);
 }
 
-.np-icon-btn {
+.ph-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -131,10 +131,10 @@ body { margin: 0; }
 }
 
 /* Filter chips: comfortable touch height on phones. */
-.np-chip { min-height: 42px; }
+.ph-chip { min-height: 42px; }
 
 /* Hero + promo: single column on phones, split on wider screens. */
-.np-hero, .np-promo {
+.ph-hero, .ph-promo {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1.5rem;
@@ -142,23 +142,23 @@ body { margin: 0; }
 }
 
 /* Live panel internals: game state stacks above the pitch feed on phones. */
-.np-panel-grid {
+.ph-panel-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1.2rem;
 }
 /* Let columns shrink below their content width — the wide pitch-feed table
-   must scroll inside .np-scroll, not stretch the column. */
-.np-panel-grid > * { min-width: 0; }
+   must scroll inside .ph-scroll, not stretch the column. */
+.ph-panel-grid > * { min-width: 0; }
 
 /* Wide data tables scroll inside their card, never the page. */
-.np-scroll {
+.ph-scroll {
   overflow-x: auto;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
-.np-footer {
+.ph-footer {
   background: #0f1b2d;
   color: #c4d1e0;
   /* clear the fixed bottom tab bar */
@@ -166,10 +166,10 @@ body { margin: 0; }
 }
 
 @media (min-width: 768px) {
-  .np-main { padding: 1.4rem 0 3rem; }
-  .np-header-inner { padding: .7rem 0; }
-  .np-header-inner .np-icon-btn { margin-left: 0; }
-  .np-nav {
+  .ph-main { padding: 1.4rem 0 3rem; }
+  .ph-header-inner { padding: .7rem 0; }
+  .ph-header-inner .ph-icon-btn { margin-left: 0; }
+  .ph-nav {
     position: static;
     margin-left: auto;
     border-top: 0;
@@ -179,30 +179,30 @@ body { margin: 0; }
     padding: .25rem;
     gap: .22rem;
   }
-  .np-tab {
+  .ph-tab {
     flex: none;
     min-height: 0;
     padding: .4rem .85rem;
     border-radius: 999px;
   }
-  .np-tab-on {
+  .ph-tab-on {
     background: var(--seg-active-bg);
     color: var(--seg-active-fg);
     box-shadow: 0 1px 2px rgba(15,27,45,.14);
   }
-  .np-icon-btn { width: 34px; height: 34px; }
-  .np-chip { min-height: 0; }
-  .np-hero { grid-template-columns: 1.25fr .9fr; gap: 2rem; }
-  .np-panel-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-  .np-footer { padding: 1.8rem 0; }
+  .ph-icon-btn { width: 34px; height: 34px; }
+  .ph-chip { min-height: 0; }
+  .ph-hero { grid-template-columns: 1.25fr .9fr; gap: 2rem; }
+  .ph-panel-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .ph-footer { padding: 1.8rem 0; }
 }
 
 @media (min-width: 900px) {
-  .np-promo { grid-template-columns: 1.05fr .95fr; gap: 2rem; }
+  .ph-promo { grid-template-columns: 1.05fr .95fr; gap: 2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .np-root, .np-root * {
+  .ph-root, .ph-root * {
     animation: none !important;
     transition: none !important;
   }

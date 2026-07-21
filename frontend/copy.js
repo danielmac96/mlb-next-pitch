@@ -1,27 +1,27 @@
 // ════════════════════════════════════════════════════════════════════════
 // copy.js — every positioning-sensitive user-facing string in one place.
 //
-// The app reads window.NP_COPY, never inline literals, for anything that
+// The app reads window.PH_COPY, never inline literals, for anything that
 // carries brand voice or product positioning (hero, tabs, promos, footer,
 // disclaimers). Micro-labels that are pure data vocabulary (column headers,
-// B/S/O, pitch types) stay inline in nextpitch.js.
+// B/S/O, pitch types) stay inline in pitchhawk.js.
 //
 // Two voices live here:
-//   • The base strings position NextPitch as a live analytics board.
+//   • The base strings position Pitch Hawk as a live analytics board.
 //   • WAGERING_OVERRIDES restores the odds/edge/picks framing and its
-//     compliance copy; they apply only when NP_FEATURES.wageringInsights is
+//     compliance copy; they apply only when PH_FEATURES.wageringInsights is
 //     on (see config.js), so the whole repositioning is a one-flag flip.
 //
-// Loads after config.js and before nextpitch.js.
+// Loads after config.js and before pitchhawk.js.
 // ════════════════════════════════════════════════════════════════════════
-window.NP_COPY = (function () {
+window.PH_COPY = (function () {
   var C = {
     // header
     tabs: [["home", "Home"], ["live", "Live Board"], ["data", "Data Feed"]],
 
     // home · hero
     heroBadge: "MLB · Live At-Bat Analytics",
-    heroTitle: "The next pitch, called before it's thrown.",
+    heroTitle: "Every pitch, read before it lands.",
     heroSub:
       "Live pitch-by-pitch data with model-predicted probabilities for every " +
       "at-bat. The board wakes at first pitch and follows every game as it unfolds.",
@@ -96,7 +96,7 @@ window.NP_COPY = (function () {
       "is legal. Gambling problem? Call 1-800-GAMBLER.",
   };
 
-  if (window.NP_FEATURES && window.NP_FEATURES.wageringInsights) {
+  if (window.PH_FEATURES && window.PH_FEATURES.wageringInsights) {
     Object.assign(C, WAGERING_OVERRIDES);
   }
   return C;

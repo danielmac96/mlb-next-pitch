@@ -18,7 +18,7 @@ import httpx
 from backend.db.client import get_client
 
 MLB_API_BASE = "https://statsapi.mlb.com/api/v1.1"
-WEATHER_USER_AGENT = "mlb-next-pitch (danielmac96@gmail.com)"
+WEATHER_USER_AGENT = "pitch-hawk (danielmac96@gmail.com)"
 
 # Treat retractables as dome=True for now (refine later when MLB Stats API
 # exposes roof state per game).

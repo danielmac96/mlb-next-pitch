@@ -1,20 +1,26 @@
 # Rebrand inventory — de-gambling the frontend
 
-What was hidden or rewritten to reposition NextPitch as a live analytics
+> **Name migration.** The product was renamed **NextPitch → Pitch Hawk** (repo
+> and Vercel app `mlb-next-pitch → pitch-hawk`). Frontend files, the JS
+> namespace (`window.PITCHHAWK`, `PH_*`, `ph-*`), the wagering env var, and all
+> user-facing copy moved to the new brand. pg_cron job names (`np-*`) were left
+> unchanged — they are live DB identifiers, not brand surface.
+
+What was hidden or rewritten to reposition Pitch Hawk as a live analytics
 board, where it lives, and how to restore the wagering UI. Produced during
 the brand/mobile-first session; the classification below is the working
 record of every gambling-term hit in the repo.
 
 ## The flag
 
-One flag gates everything: `window.NP_FEATURES.wageringInsights`
+One flag gates everything: `window.PH_FEATURES.wageringInsights`
 (`frontend/config.js`). Default **off**.
 
 Restore paths (either works, no code changes):
 
-1. **Build time** — `NEXTPITCH_FEATURE_WAGERING=true bash scripts/build_frontend.sh`
-   (on Vercel: set the `NEXTPITCH_FEATURE_WAGERING` env var to `true`).
-2. **Runtime, any browser** — `localStorage["np-feature-wagering"] = "true"`,
+1. **Build time** — `PITCHHAWK_FEATURE_WAGERING=true bash scripts/build_frontend.sh`
+   (on Vercel: set the `PITCHHAWK_FEATURE_WAGERING` env var to `true`).
+2. **Runtime, any browser** — `localStorage["ph-feature-wagering"] = "true"`,
    reload. (`"false"` forces it off; removing the key falls back to the
    build-time value.)
 
@@ -31,7 +37,7 @@ per-game `/edge/{game_pk}` API calls.
 
 | Where | Was | Is (flag off) |
 | --- | --- | --- |
-| `index.html` title | NextPitch — MLB At-Bat Markets | NextPitch — Live MLB At-Bat Analytics |
+| `index.html` title | Pitch Hawk — MLB At-Bat Markets | Pitch Hawk — Live MLB At-Bat Analytics |
 | `index.html` meta description | "…markets, probabilities, and projections…" | "…probabilities, projections, and the game state…" |
 | Header/live tab | Live Markets | Live Board / Live board |
 | Hero badge | MLB · At-Bat Markets | MLB · Live At-Bat Analytics |
@@ -43,14 +49,14 @@ per-game `/edge/{game_pk}` API calls.
 | Stale banner | "showing last known prices" | "showing the last data received" |
 | `README.md` | "MLB live at-bat markets" title | "live MLB at-bat analytics" + positioning note |
 
-### Surface — hidden behind the flag (`WAGER` in `nextpitch.js`)
+### Surface — hidden behind the flag (`WAGER` in `pitchhawk.js`)
 
 - Sources filter row (DraftKings / FanDuel / Kalshi / Polymarket chips), Live tab
 - Edge-threshold legend + all edge-based highlighting (`bestOfSources` returns
   null when off, so `hot()` never fires)
 - Edge column (header + chip cell) in the Data Feed "Live at-bats · all games" table
 - "Recently settled at-bats" block (Pick/Price/Result table)
-- `/edge/{game_pk}` fetches in `loadLive()` (`nextpitch-data.js`) — verified at
+- `/edge/{game_pk}` fetches in `loadLive()` (`pitchhawk-data.js`) — verified at
   the network level, not just the DOM
 
 ### Data — left in place, disconnected from the UI
@@ -60,7 +66,7 @@ per-game `/edge/{game_pk}` API calls.
   predictions, picks, bet_clicks tables), `backend/` FastAPI mirror,
   `scripts/train_models.py`, all tests. Nothing renamed — the model-vs-market
   pipeline is the product's data layer and keeps running.
-- `frontend/nextpitch-data.js` edge engine (odds math, SOURCES, buildSources,
+- `frontend/pitchhawk-data.js` edge engine (odds math, SOURCES, buildSources,
   sample generators) — still exported, consumed only when the flag is on.
 - `frontend/picks-data.js` — sample picks/track-record dataset; was already
   not loaded by `index.html`. Untouched.
@@ -75,5 +81,5 @@ per-game `/edge/{game_pk}` API calls.
 
 `rg -i "sportsbook|parlay|bankroll|\bwager|1-800-GAMBLER" frontend/` must hit
 only `copy.js` (wagering-variant strings), `config.js`/`build_frontend.sh`
-(flag plumbing), `nextpitch-data.js`/`picks-data.js` (Data bucket), and
+(flag plumbing), `pitchhawk-data.js`/`picks-data.js` (Data bucket), and
 comments. No default-rendered string may match.

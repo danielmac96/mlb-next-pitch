@@ -1,6 +1,6 @@
-# NextPitch — live MLB at-bat analytics
+# Pitch Hawk — live MLB at-bat analytics
 
-NextPitch ingests all MLB data daily, polls live games in real time, scores
+Pitch Hawk ingests all MLB data daily, polls live games in real time, scores
 per-market prediction models, prices them against real odds, and tracks every
 published pick — **hosted entirely on Supabase** (Postgres + edge functions +
 pg_cron), with a static frontend on Vercel.
@@ -11,17 +11,17 @@ pg_cron), with a static frontend on Vercel.
 > betting-compliance copy, and the `/edge` API calls) are gated behind a
 > single feature flag, **off by default**. The odds/edge/picks pipeline below
 > keeps running untouched; only its UI is hidden. To restore the wagering UI,
-> build with `NEXTPITCH_FEATURE_WAGERING=true` (or set
-> `localStorage["np-feature-wagering"]="true"` in a running browser). Details:
+> build with `PITCHHAWK_FEATURE_WAGERING=true` (or set
+> `localStorage["ph-feature-wagering"]="true"` in a running browser). Details:
 > [`docs/rebrand-inventory.md`](docs/rebrand-inventory.md).
 
-- **Live site:** https://mlb-next-pitch.vercel.app
+- **Live site:** https://pitch-hawk.vercel.app
 - **Live API:** `https://gfxpchtyncgsczqdvohr.supabase.co/functions/v1/api`
   (`/health` is the single-pane status check)
 
 ## Project Overview
 
-**What it does.** During live MLB games, NextPitch predicts micro-markets on
+**What it does.** During live MLB games, Pitch Hawk predicts micro-markets on
 every plate appearance — next-pitch speed, next-pitch result, at-bat outcome,
 pitches in the at-bat — plus game moneylines. Predictions are joined to real
 odds (ESPN consensus, Kalshi, optionally The Odds API), the model-vs-market
@@ -179,13 +179,13 @@ erDiagram
 
 ```
 ├── frontend/               # static SPA (no build step; open index.html)
-│   ├── index.html          #   shell: mounts #np-root, loads the scripts
-│   ├── nextpitch.js        #   renders Home / Live Markets / Data Feed tabs
-│   ├── nextpitch-data.js   #   sample data + edge engine + loadLive() adapter
+│   ├── index.html          #   shell: mounts #ph-root, loads the scripts
+│   ├── pitchhawk.js        #   renders Home / Live Markets / Data Feed tabs
+│   ├── pitchhawk-data.js   #   sample data + edge engine + loadLive() adapter
 │   ├── picks-data.js       #   sample picks/record data (not loaded by index.html)
 │   ├── copy.js             #   all positioning-sensitive strings (analytics + wagering variants)
 │   ├── config.js           #   injects window.PITCH_EDGE_API + feature flags at build time
-│   └── nextpitch.css       #   theme tokens (light/dark), layout
+│   └── pitchhawk.css       #   theme tokens (light/dark), layout
 ├── supabase/
 │   ├── functions/          # PRODUCTION backend (Deno edge functions)
 │   │   ├── _shared/        #   db/http/mlb/ingest/model/vocab modules

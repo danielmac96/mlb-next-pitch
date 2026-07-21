@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════
-// nextpitch-data.js — Edge engine + render-ready live dataset.
+// pitchhawk-data.js — Edge engine + render-ready live dataset.
 //
 // Mirrors the backend contract (GET /edge/{game_pk}, GET /live):
 //   • Four model-priced micro-markets: pitch_speed_ou, pitch_result,
@@ -13,7 +13,7 @@
 // Illustrative sample data — not real odds, not betting advice.
 // ════════════════════════════════════════════════════════════════════════
 
-window.NEXTPITCH = (function () {
+window.PITCHHAWK = (function () {
   // ── odds math ─────────────────────────────────────────────────────────
   const clampP = (p) => Math.max(0.02, Math.min(0.97, p));
   const impliedFromAmerican = (a) => (a < 0 ? -a / (-a + 100) : 100 / (a + 100));
@@ -624,7 +624,7 @@ window.NEXTPITCH = (function () {
     if (!Array.isArray(live) || !live.length) return [];
     // Wagering surfaces off → no odds/edge data is fetched at all; markets
     // normalize from /live alone (model probs, no source prices, edge null).
-    const wager = !!(window.NP_FEATURES && window.NP_FEATURES.wageringInsights);
+    const wager = !!(window.PH_FEATURES && window.PH_FEATURES.wageringInsights);
     const edgeRows = wager ? await Promise.all(live.map(async (lg) => {
       try {
         const r = await f(`${apiBase}/edge/${lg.game_pk}`);
@@ -649,4 +649,4 @@ window.NEXTPITCH = (function () {
   };
 })();
 
-window.dispatchEvent(new Event("nextpitch-ready"));
+window.dispatchEvent(new Event("pitchhawk-ready"));

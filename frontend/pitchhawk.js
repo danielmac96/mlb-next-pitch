@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════
-// nextpitch.js — NextPitch single-page app.
+// pitchhawk.js — Pitch Hawk single-page app.
 //
 // One page, three tabs: Home / Live Markets / Data Feed. Vanilla port of the
 // design reference's `class Component` (design_handoff_live_markets) — same
@@ -9,8 +9,8 @@
 //
 // Data layer (live-only):
 //   • Home shows today's schedule from GET /games, refreshed alongside polls.
-//   • Live Markets + Data Feed read window.NEXTPITCH.games, filled exclusively
-//     by NEXTPITCH.loadLive (/live + /edge). The board is empty outside game
+//   • Live Markets + Data Feed read window.PITCHHAWK.games, filled exclusively
+//     by PITCHHAWK.loadLive (/live + /edge). The board is empty outside game
 //     windows. No odds are ingested yet, so price/edge columns render "—";
 //     picks and the graded record return to the UI when odds ship.
 // ════════════════════════════════════════════════════════════════════════
@@ -20,18 +20,18 @@
   const API_BASE = window.PITCH_EDGE_API || "http://localhost:8080";
   const POLL_MS = 8000;   // backend polls MLB every ~8s (POLL_INTERVAL_SECONDS)
 
-  const NP = window.NEXTPITCH;
-  const COPY = window.NP_COPY;
+  const PH = window.PITCHHAWK;
+  const COPY = window.PH_COPY;
   // Wagering surfaces (source filters, edge highlighting/columns, settled
   // picks) render only when the flag is on — see config.js / copy.js.
-  const WAGER = !!(window.NP_FEATURES && window.NP_FEATURES.wageringInsights);
+  const WAGER = !!(window.PH_FEATURES && window.PH_FEATURES.wageringInsights);
 
   const esc = (s) =>
     String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   function initialDark() {
-    const saved = localStorage.getItem("np-theme");
+    const saved = localStorage.getItem("ph-theme");
     if (saved === "dark") return true;
     if (saved === "light") return false;
     return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -54,7 +54,7 @@
   const liveNowCount = () =>
     Array.isArray(SLATE)
       ? SLATE.filter((g) => isLiveStatus(g.status)).length
-      : NP.games.length;
+      : PH.games.length;
 
   // Upcoming games slate (GET /games). null = not loaded yet, [] = none scheduled.
   let SLATE = null;
@@ -149,7 +149,7 @@
     }
     predResultHtml(pred, pending) {
       if (!pred || !pred.resultCat) return `<span style="color:var(--faint);">—</span>`;
-      const label = NP.OUTCOME_LABEL[pred.resultCat] || pred.resultCat;
+      const label = PH.OUTCOME_LABEL[pred.resultCat] || pred.resultCat;
       const prob = pred.resultProb != null ? ` ${Math.round(pred.resultProb * 100)}%` : "";
       const mark = pred.resultOk === true ? " ✓" : pred.resultOk === false ? " ✗" : "";
       return `<span style="font-weight:600;color:${this.predColor(pred.resultOk, pending)};">${esc(label)}<span style="font-family:'IBM Plex Mono',monospace;font-size:.92em;">${esc(prob)}</span>${mark}</span>`;
@@ -178,7 +178,7 @@
         case "goLive": return this.setState({ view: "live" });
         case "theme": {
           const dark = !this.state.dark;
-          localStorage.setItem("np-theme", dark ? "dark" : "light");
+          localStorage.setItem("ph-theme", dark ? "dark" : "light");
           return this.setState({ dark });
         }
         case "liveGame": {
@@ -200,7 +200,7 @@
       const view = this.state.view;
       const tabs = COPY.tabs.map(([k, label]) => {
         const on = view === k;
-        return `<button data-act="view" data-arg="${k}" class="np-tab${on ? " np-tab-on" : ""}">${label}</button>`;
+        return `<button data-act="view" data-arg="${k}" class="ph-tab${on ? " ph-tab-on" : ""}">${label}</button>`;
       }).join("");
       const dark = this.dk();
       const liveCount = liveNowCount();
@@ -209,25 +209,25 @@
         : "No games live right now";
       return `
       <header style="position:sticky;top:0;z-index:50;background:var(--header-bg);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);">
-        <div class="np-header-inner">
+        <div class="ph-header-inner">
           <div data-act="goHome" style="display:flex;align-items:center;gap:.5rem;font-weight:800;font-size:1.16rem;letter-spacing:-.02em;color:inherit;cursor:pointer;">
             <span style="color:var(--accent);font-size:.85rem;">◆</span>
-            <span>Next<span style="color:var(--accent);">Pitch</span></span>
+            <span>Pitch<span style="color:var(--accent);">Hawk</span></span>
           </div>
           <div style="display:flex;align-items:center;gap:.42rem;font-size:.78rem;color:var(--muted);font-weight:600;">
-            <span style="width:7px;height:7px;border-radius:50%;background:var(--accent);animation:np-pulse 1.8s ease-in-out infinite;"></span>
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--accent);animation:ph-pulse 1.8s ease-in-out infinite;"></span>
             ${esc(liveText)}
           </div>
-          <nav class="np-nav">${tabs}</nav>
-          <button data-act="theme" title="Toggle light / dark" aria-label="Toggle light / dark theme" class="np-icon-btn">${dark ? "☀" : "☾"}</button>
+          <nav class="ph-nav">${tabs}</nav>
+          <button data-act="theme" title="Toggle light / dark" aria-label="Toggle light / dark theme" class="ph-icon-btn">${dark ? "☀" : "☾"}</button>
         </div>
       </header>`;
     }
     footerHtml() {
       return `
-      <footer class="np-footer">
+      <footer class="ph-footer">
         <div style="width:min(1220px,95vw);margin:0 auto;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center;">
-          <div data-act="goHome" style="display:flex;align-items:center;gap:.5rem;font-weight:800;font-size:1.05rem;color:inherit;cursor:pointer;"><span style="color:#4ade80;">◆</span> Next<span style="color:#4ade80;">Pitch</span></div>
+          <div data-act="goHome" style="display:flex;align-items:center;gap:.5rem;font-weight:800;font-size:1.05rem;color:inherit;cursor:pointer;"><span style="color:#4ade80;">◆</span> Pitch<span style="color:#4ade80;">Hawk</span></div>
           <p style="margin:0;font-size:.74rem;color:#8a9bb2;max-width:46rem;flex:1;min-width:240px;">${esc(COPY.footerDisclaimer)}</p>
         </div>
       </footer>`;
@@ -281,7 +281,7 @@
       ].map((t) => `
             <div style="display:flex;flex-direction:column;"><span style="font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:800;">${esc(t.big)}</span><span style="font-size:.76rem;color:#9fb2c9;margin-top:.15rem;">${esc(t.lbl)}</span></div>`).join("");
       const hero = `
-      <div class="np-hero" style="background:linear-gradient(180deg,var(--surface),var(--bg));border:1px solid var(--border);border-radius:18px;padding:clamp(1.3rem,4vw,2.6rem);margin-bottom:1.4rem;">
+      <div class="ph-hero" style="background:linear-gradient(180deg,var(--surface),var(--bg));border:1px solid var(--border);border-radius:18px;padding:clamp(1.3rem,4vw,2.6rem);margin-bottom:1.4rem;">
         <div>
           <span style="display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--good-strong);background:var(--good-bg);padding:.3rem .6rem;border-radius:999px;margin-bottom:1rem;">${esc(COPY.heroBadge)}</span>
           <h1 style="font-size:clamp(1.9rem,4vw,3rem);font-weight:800;letter-spacing:-.02em;margin:0;line-height:1.08;">${esc(COPY.heroTitle)}</h1>
@@ -353,7 +353,7 @@
       </div>`;
       // live board promo
       const promo = `
-      <div class="np-promo" style="background:var(--bc-bg);border:1px solid var(--bc-inner);border-radius:18px;padding:clamp(1.3rem,4vw,2.6rem);margin-bottom:1.6rem;color:#fff;">
+      <div class="ph-promo" style="background:var(--bc-bg);border:1px solid var(--bc-inner);border-radius:18px;padding:clamp(1.3rem,4vw,2.6rem);margin-bottom:1.6rem;color:#fff;">
         <div>
           <span style="display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6ee7a0;background:rgba(74,222,128,.13);padding:.3rem .6rem;border-radius:999px;margin-bottom:.9rem;">${esc(COPY.promoBadge)}</span>
           <h2 style="color:#fff;font-size:clamp(1.5rem,3vw,2.1rem);font-weight:800;letter-spacing:-.02em;margin:0;">${esc(COPY.promoTitle)}</h2>
@@ -383,7 +383,7 @@
 
     // ══ LIVE MARKETS ═════════════════════════════════════════════════════
     liveHtml() {
-      if (!NP.games.length) {
+      if (!PH.games.length) {
         return `
       <div style="margin-bottom:1.1rem;">
         <h1 style="font-size:clamp(1.5rem,3vw,2.05rem);font-weight:800;letter-spacing:-.02em;margin:0;">${esc(COPY.liveTitle)}</h1>
@@ -407,7 +407,7 @@
       const dot = (on, color) => `width:11px;height:11px;border-radius:50%;background:${on ? color : "var(--track)"};border:1px solid ${on ? color : "var(--border-2)"};`;
       const bs = (on, pos) => `position:absolute;${pos}width:14px;height:14px;border-radius:3px;background:${on ? "var(--good-strong)" : "var(--track)"};border:1.5px solid ${on ? "var(--good-strong)" : "var(--border-2)"};`;
 
-      const games = NP.games.filter((g) => this.liveGameOn(g.gamePk));
+      const games = PH.games.filter((g) => this.liveGameOn(g.gamePk));
       const panels = games.map((g) => {
         const cnt = (g.count || "0-0").split("-").map(Number);
         const balls = cnt[0] || 0, strikes = cnt[1] || 0;
@@ -470,13 +470,13 @@
             const isRec = name === pres.recommendation;
             return `
           <div style="display:grid;grid-template-columns:1.1fr 2fr auto;gap:.6rem;align-items:center;padding:.26rem 0;">
-            <div style="font-size:.84rem;font-weight:${isRec ? 700 : 500};color:${isRec ? "var(--good-strong)" : "var(--text-2)"};">${esc(NP.OUTCOME_LABEL[name] || name)}</div>
+            <div style="font-size:.84rem;font-weight:${isRec ? 700 : 500};color:${isRec ? "var(--good-strong)" : "var(--text-2)"};">${esc(PH.OUTCOME_LABEL[name] || name)}</div>
             <div style="height:7px;background:var(--track);border-radius:999px;overflow:hidden;"><div style="height:100%;width:${pv}%;background:${isRec ? "var(--accent)" : "var(--vs)"};border-radius:999px;"></div></div>
             <span style="font-family:'IBM Plex Mono',monospace;font-size:.82rem;font-weight:600;color:var(--text-2);min-width:34px;text-align:right;">${pv}%</span>
           </div>`;
           }).join("");
         const spdLine = spd.predictedValue != null
-          ? `<div style="display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-top:.45rem;"><span style="color:var(--faint);">Speed projection</span><b style="font-family:'IBM Plex Mono',monospace;font-weight:700;">${esc(Number(spd.predictedValue).toFixed(1))} mph${spd.line != null && spd.recommendation ? ` · ${esc(NP.OUTCOME_LABEL[spd.recommendation] || spd.recommendation)} ${esc(spd.line)}` : ""}</b></div>`
+          ? `<div style="display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-top:.45rem;"><span style="color:var(--faint);">Speed projection</span><b style="font-family:'IBM Plex Mono',monospace;font-weight:700;">${esc(Number(spd.predictedValue).toFixed(1))} mph${spd.line != null && spd.recommendation ? ` · ${esc(PH.OUTCOME_LABEL[spd.recommendation] || spd.recommendation)} ${esc(spd.line)}` : ""}</b></div>`
           : "";
         // Say WHICH pitch the read is for, in the feed's numbering — pitch
         // N+1 of this at-bat, or pitch #1 of the next batter once it ends.
@@ -507,7 +507,7 @@
             : `font-family:'IBM Plex Mono',monospace;font-size:.82rem;font-weight:600;color:var(--text-2);min-width:34px;text-align:right;`;
           return `
           <div style="display:grid;grid-template-columns:1.1fr 2fr auto;gap:.6rem;align-items:center;padding:.26rem 0;">
-            <div style="${nameStyle}">${esc(NP.OUTCOME_LABEL[name] || name)}</div>
+            <div style="${nameStyle}">${esc(PH.OUTCOME_LABEL[name] || name)}</div>
             <div style="height:7px;background:var(--track);border-radius:999px;overflow:hidden;"><div style="${barW}"></div></div>
             <span style="${pctStyle}">${pctv}%</span>
           </div>`;
@@ -532,7 +532,7 @@
           <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem;padding-bottom:.8rem;border-bottom:1px solid var(--border);">
             <span style="font-weight:800;font-size:1.1rem;">${esc(g.label)}</span>${pausedTag}
           </div>
-          <div class="np-panel-grid">
+          <div class="ph-panel-grid">
 
             <!-- LEFT: game state -->
             <div style="display:flex;flex-direction:column;gap:1rem;">
@@ -594,7 +594,7 @@
                 <span style="font-weight:800;font-size:1rem;">Pitch feed</span>
                 <span style="font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);">This at-bat</span>
               </div>
-              <div class="np-scroll"><div style="min-width:460px;">
+              <div class="ph-scroll"><div style="min-width:460px;">
                 <div style="display:grid;grid-template-columns:${feedGrid};gap:.35rem;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;padding:0 .25rem .4rem;border-bottom:1px solid var(--border);">
                   <span>#</span><span>Type</span><span>Velo</span><span>xVelo</span><span>Result</span><span>xResult</span><span style="text-align:right;">Count</span>
                 </div>
@@ -618,12 +618,12 @@
 
       // filters bar
       const chipStyle = (on, accent) => `border:1px solid ${on ? (accent || "var(--pill-active-bg)") : "var(--border-2)"};background:${on ? (accent || "var(--pill-active-bg)") : "var(--surface)"};color:${on ? (accent ? "#fff" : "var(--pill-active-fg)") : "var(--text-2)"};font-family:inherit;font-weight:600;font-size:.76rem;padding:.32rem .7rem;border-radius:999px;cursor:pointer;transition:all .14s;`;
-      const allOn = NP.games.every((g) => this.liveGameOn(g.gamePk));
-      const gameChips = NP.games.map((g) => `<button data-act="liveGame" data-arg="${g.gamePk}" class="np-chip" style="${chipStyle(this.liveGameOn(g.gamePk))}">${esc(g.label)}</button>`).join("");
-      const sourceChips = Object.keys(NP.SOURCES).map((k) => {
-        const s = NP.SOURCES[k]; const on = !!this.state.liveSources[k];
+      const allOn = PH.games.every((g) => this.liveGameOn(g.gamePk));
+      const gameChips = PH.games.map((g) => `<button data-act="liveGame" data-arg="${g.gamePk}" class="ph-chip" style="${chipStyle(this.liveGameOn(g.gamePk))}">${esc(g.label)}</button>`).join("");
+      const sourceChips = Object.keys(PH.SOURCES).map((k) => {
+        const s = PH.SOURCES[k]; const on = !!this.state.liveSources[k];
         const accent = s.type === "book" ? "var(--blue)" : "var(--purple)";
-        return `<button data-act="liveSource" data-arg="${k}" class="np-chip" style="${chipStyle(on, on ? accent : null)}">${esc(s.short)}</button>`;
+        return `<button data-act="liveSource" data-arg="${k}" class="ph-chip" style="${chipStyle(on, on ? accent : null)}">${esc(s.short)}</button>`;
       }).join("");
       const thresholdText = (thr * 100).toFixed(1) + "%";
 
@@ -640,7 +640,7 @@
       <div style="display:flex;flex-direction:column;gap:.55rem;margin-bottom:1.1rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.75rem .85rem;box-shadow:0 1px 2px rgba(15,27,45,.04);">
         <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;">
           <span style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);width:54px;">Games</span>
-          <button data-act="liveAllGames" class="np-chip" style="${chipStyle(allOn)}">All</button>${gameChips}
+          <button data-act="liveAllGames" class="ph-chip" style="${chipStyle(allOn)}">All</button>${gameChips}
         </div>${sourcesRow}${legendRow}
       </div>`;
 
@@ -659,13 +659,13 @@
 
     // ══ DATA FEED ════════════════════════════════════════════════════════
     dataHtml() {
-      if (!NP.games.length) return `<div style="padding:3rem 0;text-align:center;color:var(--faint);">No live games right now.</div>`;
-      const sel = NP.games.find((g) => g.gamePk === this.state.feedGame) || NP.games[0];
-      const gameSel = NP.games.map((g) => {
+      if (!PH.games.length) return `<div style="padding:3rem 0;text-align:center;color:var(--faint);">No live games right now.</div>`;
+      const sel = PH.games.find((g) => g.gamePk === this.state.feedGame) || PH.games[0];
+      const gameSel = PH.games.map((g) => {
         const on = g.gamePk === sel.gamePk;
         const style = `display:flex;align-items:center;gap:.4rem;border:1px solid ${on ? "var(--pill-active-bg)" : "var(--border-2)"};background:${on ? "var(--pill-active-bg)" : "var(--surface)"};color:${on ? "var(--pill-active-fg)" : "var(--text-2)"};font-family:inherit;font-weight:600;font-size:.8rem;padding:.4rem .72rem;border-radius:999px;cursor:pointer;transition:all .14s;`;
         const dot = `width:7px;height:7px;border-radius:50%;background:${g.stale ? "#c9a23a" : "var(--accent)"};`;
-        return `<button data-act="feedGame" data-arg="${g.gamePk}" class="np-chip" style="${style}"><span style="${dot}"></span>${esc(g.label)}</button>`;
+        return `<button data-act="feedGame" data-arg="${g.gamePk}" class="ph-chip" style="${style}"><span style="${dot}"></span>${esc(g.label)}</button>`;
       }).join("");
 
       const dataGrid = "38px 56px 64px 60px 46px 1fr minmax(112px,1fr) 56px";
@@ -701,7 +701,7 @@
       const abProj = abp.line != null
         ? `${abp.recommendation === "over" ? "Over" : "Under"} ${abp.line} (proj ${abp.predictedValue != null ? abp.predictedValue : "—"})`
         : "—";
-      const abCall = NP.OUTCOME_LABEL[abr.recommendation] || abr.recommendation || "—";
+      const abCall = PH.OUTCOME_LABEL[abr.recommendation] || abr.recommendation || "—";
       const abConf = abr.conf != null ? abr.conf : abr.modelProb;
 
       const cnt = (sel.count || "0-0").split("-").map(Number);
@@ -713,7 +713,7 @@
       // The Edge column belongs to the wagering surface — the analytics board
       // shows the model call and probability only.
       const abGrid = WAGER ? "1fr 1.2fr 1.2fr .6fr .5fr .9fr auto" : "1fr 1.2fr 1.2fr .6fr .5fr .9fr";
-      const liveAtBats = NP.games.map((g) => {
+      const liveAtBats = PH.games.map((g) => {
         const m = g.m.ab_result;
         const edgeCell = WAGER
           ? `<span style="text-align:right;"><span style="${this.chipSm(m.edge)}">${esc(this.fmtEdge(m.edge))}</span></span>`
@@ -725,14 +725,14 @@
             <span style="color:var(--text-2);">${esc(g.batter.name)}</span>
             <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);">${esc(g.count)}</span>
             <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);">${esc(g.pitchCountPa)}</span>
-            <span style="font-weight:600;">${esc(NP.OUTCOME_LABEL[m.recommendation] || m.recommendation || "—")} <span style="color:var(--faint);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:.74rem;">${esc(this.pct(m.modelProb))}</span></span>
+            <span style="font-weight:600;">${esc(PH.OUTCOME_LABEL[m.recommendation] || m.recommendation || "—")} <span style="color:var(--faint);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:.74rem;">${esc(this.pct(m.modelProb))}</span></span>
             ${edgeCell}
           </div>
         </div>`;
       }).join("");
 
       const d = this.dk();
-      const recentRows = NP.RECENT.map((r) => {
+      const recentRows = PH.RECENT.map((r) => {
         const tone = r.result === "win" ? (d ? ["#5fe093", "#123020"] : ["#0f7a44", "#e7f4ed"])
           : r.result === "loss" ? (d ? ["#ff7b6b", "#3a1c1a"] : ["#c0392f", "#fbece9"])
             : (d ? ["#e0a83a", "#33280d"] : ["#b07d12", "#fbf2dc"]);
@@ -749,9 +749,9 @@
       }).join("");
 
       // settled-picks proof points return with the graded record (wagering only)
-      const recentBlock = WAGER && NP.RECENT.length ? `
+      const recentBlock = WAGER && PH.RECENT.length ? `
       <div style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 .6rem;">Recently settled at-bats</div>
-      <div class="np-scroll" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;">
+      <div class="ph-scroll" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;">
         <div style="min-width:560px;">
           <div style="display:grid;grid-template-columns:.6fr 1fr 1.2fr 1.6fr .5fr .7fr auto;gap:.5rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:.5rem .4rem;border-bottom:1px solid var(--border);">
             <span>Date</span><span>Game</span><span>Batter</span><span>Pick</span><span>P</span><span>Price</span><span style="text-align:right;">Result</span>
@@ -817,7 +817,7 @@
             <div style="font-weight:800;font-size:1rem;">${esc(sel.label)}</div>
             <span style="font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);">This at-bat</span>
           </div>
-          <div class="np-scroll"><div style="min-width:560px;">
+          <div class="ph-scroll"><div style="min-width:560px;">
             <div style="display:grid;grid-template-columns:${dataGrid};gap:.4rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:0 .3rem .4rem;border-bottom:1px solid var(--border);">
               <span>#</span><span>Type</span><span>Velo</span><span>xVelo</span><span>Zone</span><span>Result</span><span>xResult</span><span style="text-align:right;">Count</span>
             </div>
@@ -833,7 +833,7 @@
       </div>
 
       <div style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 .6rem;">Live at-bats · all games</div>
-      <div class="np-scroll" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;margin-bottom:1.6rem;">
+      <div class="ph-scroll" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(15,27,45,.04),0 6px 16px rgba(15,27,45,.05);padding:.4rem .6rem;margin-bottom:1.6rem;">
         <div style="min-width:540px;">
           <div style="display:grid;grid-template-columns:${abGrid};gap:.5rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:.5rem .4rem;border-bottom:1px solid var(--border);">
             <span>Game</span><span>Pitcher</span><span>Batter</span><span>Count</span><span>P</span><span>Model call</span>${WAGER ? `<span style="text-align:right;">Edge</span>` : ""}
@@ -854,7 +854,7 @@
       else main = this.dataHtml();
       this.root.innerHTML = `
         ${this.headerHtml()}
-        <main class="np-main">${main}</main>
+        <main class="ph-main">${main}</main>
         ${this.footerHtml()}`;
     }
 
@@ -869,23 +869,23 @@
     async poll() {
       try {
         await fetchSlate().catch(() => {}); // throttled to 60s; needed for the finals filter
-        const games = await NP.loadLive(API_BASE);
+        const games = await PH.loadLive(API_BASE);
         if (Array.isArray(games)) {
           // [] is a real answer (no live games) — empty the board.
-          NP.games = this._withoutFinals(games);
-          if (NP.games.length && !NP.games.some((g) => g.gamePk === this.state.feedGame)) {
-            this.state.feedGame = NP.games[0].gamePk;
+          PH.games = this._withoutFinals(games);
+          if (PH.games.length && !PH.games.some((g) => g.gamePk === this.state.feedGame)) {
+            this.state.feedGame = PH.games[0].gamePk;
           }
           this.render();
         }
         // loadLive throws on network error → keep last-good board.
-      } catch (_e) { console.warn("[nextpitch] live poll failed; keeping last data"); }
+      } catch (_e) { console.warn("[pitchhawk] live poll failed; keeping last data"); }
     }
     async hydrate() {
       try {
         const changed = await fetchSlate();
         if (changed) {
-          NP.games = this._withoutFinals(NP.games); // a game may have just gone final
+          PH.games = this._withoutFinals(PH.games); // a game may have just gone final
           this.render();
         }
       } catch (_e) { /* keep last-good schedule */ }
@@ -906,14 +906,14 @@
     // design, so an idle board is never flagged as stale.
     async checkHealth() {
       const h = await fetchJson("/health");
-      this._setStaleBanner(!!(h && h.data_fresh === false) && NP.games.length > 0, h);
+      this._setStaleBanner(!!(h && h.data_fresh === false) && PH.games.length > 0, h);
     }
     _setStaleBanner(stale, h) {
-      let el = document.getElementById("np-stale");
+      let el = document.getElementById("ph-stale");
       if (!stale) { if (el) el.remove(); return; }
       if (!el) {
         el = document.createElement("div");
-        el.id = "np-stale";
+        el.id = "ph-stale";
         el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#b9541b;" +
           "color:#fff;text-align:center;font-size:.85rem;padding:.4rem;font-family:inherit;";
         document.body.appendChild(el);
@@ -936,13 +936,13 @@
   }
 
   function boot() {
-    const root = document.getElementById("np-root");
-    if (!window.NEXTPITCH) {
-      root.innerHTML = `<div style="padding:4.5rem 0;text-align:center;color:#7a879c;font-size:.95rem;">Loading NextPitch…</div>`;
+    const root = document.getElementById("ph-root");
+    if (!window.PITCHHAWK) {
+      root.innerHTML = `<div style="padding:4.5rem 0;text-align:center;color:#7a879c;font-size:.95rem;">Loading Pitch Hawk…</div>`;
       return;
     }
     const board = new Board(root);
-    board.state.feedGame = NP.games[0] ? NP.games[0].gamePk : null;
+    board.state.feedGame = PH.games[0] ? PH.games[0].gamePk : null;
     board.start();
     window.__npBoard = board;
   }

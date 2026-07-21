@@ -21,13 +21,13 @@
   // tables, betting-compliance copy, and the /edge API calls themselves.
   // Off by default — the app positions as a live analytics board.
   //
-  // To re-enable: set NEXTPITCH_FEATURE_WAGERING=true at build time
+  // To re-enable: set PITCHHAWK_FEATURE_WAGERING=true at build time
   // (scripts/build_frontend.sh substitutes the placeholder below), or in any
-  // running browser set localStorage["np-feature-wagering"]="true" and reload.
+  // running browser set localStorage["ph-feature-wagering"]="true" and reload.
   var wagering = "{{FEATURE_WAGERING}}"; // substituted at deploy time
   var lsWagering = null;
-  try { lsWagering = localStorage.getItem("np-feature-wagering"); } catch (_e) {}
-  window.NP_FEATURES = window.NP_FEATURES || {
+  try { lsWagering = localStorage.getItem("ph-feature-wagering"); } catch (_e) {}
+  window.PH_FEATURES = window.PH_FEATURES || {
     wageringInsights: lsWagering != null ? lsWagering === "true" : wagering === "true",
   };
 })();

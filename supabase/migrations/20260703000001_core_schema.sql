@@ -1,4 +1,4 @@
--- NextPitch — consolidated core schema (supersedes backend/db/*.sql).
+-- Pitch Hawk — consolidated core schema (supersedes backend/db/*.sql).
 -- Idempotent: safe to re-run. Applied to the live project via Supabase MCP /
 -- CLI; kept in-repo as the source of truth.
 

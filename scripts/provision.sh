@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command provisioning of the entire NextPitch pipeline onto Supabase.
+# One-command provisioning of the entire Pitch Hawk pipeline onto Supabase.
 #
 # Prereqs:
 #   * supabase CLI installed and logged in  (npm i -g supabase; supabase login)
